@@ -130,7 +130,7 @@ def classificar_oportunidade(num_canais):
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
-        return 3, "🥉 HIDDEN GEM"
+        return 3, " HIDDEN GEM"
 
 def formatar_alerta(par, nivel, canais_mencionados):
     token_symbol = par.get('baseToken', {}).get('symbol', 'Unknown')
@@ -147,7 +147,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     except:
         price_formatted = "N/A"
     
-    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+    emojis = {1: "", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
         1: "Multiple alpha channels talking!",
@@ -155,36 +155,28 @@ def formatar_alerta(par, nivel, canais_mencionados):
         3: "Nobody talking yet! Pure alpha!"
     }
     
-    dex_link = f"https://dexscreener.com/{rede.lower()}/{ca}"
+    # Link DexScreener coberto (apenas texto clicável)
+    dex_link = f"[DexScreener](https://dexscreener.com/{rede.lower()}/{ca})"
     
-    canais_info = ""
-    if canais_mencionados:
-        canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
-    
-    mensagem = f"""{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}
-
-{descricoes[nivel]}
-{canais_info}
-
- {dex_link}
-
-🥇 *Token:* #{token_symbol} ({token_symbol})
-*CA:* `{ca}`
-*Chain:* {rede}
-*Price:* {price_formatted}
-*Market Cap:* ${market_cap:,.2f}
-*Liquidity:* ${liquidez:,.2f}
-*Vol 24h:* ${volume_24h:,.2f}
-*Pump 1h:* {pump_1h}%
-
-✅ *Filters:*
-• Liquidity > $5k
-• Market Cap > $10k
-• Volume OK
-• Pump < 10%
-• Pair age > 1h
-
-⚠️ _DYOR!_"""
+    # Layout NOVO conforme solicitado
+    mensagem = (
+        f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n"
+        f"\n"
+        f"📌 *{descricoes[nivel]}*\n"
+        f"\n"
+        f"🥇 *Token:* #{token_symbol} ({token_symbol})\n"
+        f"*CA:* `{ca}`\n"
+        f"*Chain:* {rede}\n"
+        f"*Price:* {price_formatted}\n"
+        f"*Market Cap:* ${market_cap:,.2f}\n"
+        f"*Liquidity:* ${liquidez:,.2f}\n"
+        f"*Vol 24h:* ${volume_24h:,.2f}\n"
+        f"*Pump 1h:* {pump_1h}%\n"
+        f"\n"
+        f"{dex_link}\n"
+        f"\n"
+        f"⚠️ _DYOR!_"
+    )
 
     return mensagem
 
@@ -213,7 +205,7 @@ async def main():
             import time
             time.sleep(2)
     else:
-        enviar_alerta_telegram("*PrimeApe 7*\n\n🔍 No opportunities found.\n\n_The radar is still active!_")
+        enviar_alerta_telegram("*PrimeApe 7*\n\n No opportunities found.\n\n_The radar is still active!_")
 
     print("\n✅ Fim.")
 
