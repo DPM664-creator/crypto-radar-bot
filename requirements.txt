@@ -1,1 +1,2 @@
-   ntscraper
+telethon
+requests
