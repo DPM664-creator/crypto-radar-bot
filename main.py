@@ -51,7 +51,7 @@ async def verificar_canais_telegram(ca_address):
     except Exception as e:
         print(f"❌ Erro na conexão Telegram: {e}")
     
-    return len(canais_que_mencionaram), canais_que_mencionados
+    return len(canais_que_mencionaram), canais_que_mencionaram
 
 def enviar_alerta_telegram(mensagem):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
@@ -101,7 +101,7 @@ def aplicar_filtros(par):
     if not liquidez or liquidez < 5000:
         return False
     
-    # Filtro 2: Market Cap mínimo $10k (NOVO)
+    # Filtro 2: Market Cap mínimo $10k
     market_cap = par.get('fdv', 0) or par.get('marketCap', 0)
     if not market_cap or market_cap < 10000:
         return False
@@ -113,7 +113,7 @@ def aplicar_filtros(par):
         if ratio > 0.10:
             return False
     
-    # Filtro 4: Pump máximo 10% em 1h (era 5%)
+    # Filtro 4: Pump máximo 10% em 1h
     pump_1h = par.get('priceChange', {}).get('h1', 0)
     if pump_1h > 10.0:
         return False
@@ -184,12 +184,12 @@ def formatar_alerta(par, nivel, canais_mencionados):
 • Pump < 10%
 • Pair age > 1h
 
-️ _DYOR!_"""
+⚠️ _DYOR!_"""
 
     return mensagem
 
 async def main():
-    print(" PrimeApe 7 Iniciado...")
+    print("🦍 PrimeApe 7 Iniciado...")
     
     oportunidades = buscar_pares_dexscreener()
     print(f"\n🎯 {len(oportunidades)} oportunidades!")
@@ -213,7 +213,7 @@ async def main():
             import time
             time.sleep(2)
     else:
-        enviar_alerta_telegram("*PrimeApe 7*\n\n No opportunities found.\n\n_Radar active!_")
+        enviar_alerta_telegram("*PrimeApe 7*\n\n🔍 No opportunities found.\n\n_The radar is still active!_")
 
     print("\n✅ Fim.")
 
