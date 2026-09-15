@@ -2,9 +2,9 @@ name: Crypto Radar Monitor
 
 on:
   schedule:
-    # Roda a cada 15 minutos (você pode ajustar depois)
+    # Roda a cada 15 minutos
     - cron: '*/15 * * * *'
-  workflow_dispatch:  # Permite rodar manualmente também
+  workflow_dispatch:  # Permite rodar manualmente
 
 jobs:
   monitor:
@@ -25,4 +25,8 @@ jobs:
           pip install -r requirements.txt
       
       - name: Rodar o bot
+        env:
+          TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
+          TWITTER_PASSWORD: ${{ secrets.TWITTER_PASSWORD }}
+          TWITTER_EMAIL: ${{ secrets.TWITTER_EMAIL }}
         run: python main.py
