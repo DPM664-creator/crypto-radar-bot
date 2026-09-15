@@ -1,4 +1,4 @@
-name: Crypto Radar Monitor
+name: PrimeApe 7 - Crypto Radar
 
 on:
   schedule:
@@ -24,9 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Rodar o bot
+      - name: Rodar o bot PrimeApe 7
         env:
-          TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
-          TWITTER_PASSWORD: ${{ secrets.TWITTER_PASSWORD }}
-          TWITTER_EMAIL: ${{ secrets.TWITTER_EMAIL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: python main.py
