@@ -1,0 +1,28 @@
+name: Crypto Radar Monitor
+
+on:
+  schedule:
+    # Roda a cada 15 minutos (você pode ajustar depois)
+    - cron: '*/15 * * * *'
+  workflow_dispatch:  # Permite rodar manualmente também
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+      
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Rodar o bot
+        run: python main.py
