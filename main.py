@@ -10,7 +10,6 @@ TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
 
-# Canais para monitorar (os 9 que você passou)
 CANAIS_ALPHA = [
     'mad_apes_gambles',
     'TheDonsCalls',
@@ -26,7 +25,6 @@ CANAIS_ALPHA = [
 REDES = ["solana", "ethereum", "bsc", "base"]
 
 async def verificar_canais_telegram(ca_address):
-    """Verifica em quantos canais o CA foi mencionado"""
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH]):
         print("⚠️ Credenciais API Telegram não configuradas")
         return 0, []
@@ -39,8 +37,7 @@ async def verificar_canais_telegram(ca_address):
         
         for canal in CANAIS_ALPHA:
             try:
-                # Busca mensagens recentes do canal
-                async for message in client.iter_messages(canal, limit=20):
+                async for message in client.iter_messages(canal, limit=50):
                     if ca_address.lower() in message.text.lower():
                         if canal not in canais_que_mencionaram:
                             canais_que_mencionaram.append(canal)
@@ -54,10 +51,9 @@ async def verificar_canais_telegram(ca_address):
     except Exception as e:
         print(f"❌ Erro na conexão Telegram: {e}")
     
-    return len(canais_que_mencionaram), canais_que_mencionaram
+    return len(canais_que_mencionaram), canais_que_mencionados
 
 def enviar_alerta_telegram(mensagem):
-    """Envia alerta formatado para o canal PrimeApe 7"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         print("⚠️ Credenciais do Bot Telegram não configuradas")
         return
@@ -66,21 +62,21 @@ def enviar_alerta_telegram(mensagem):
     data = {
         "chat_id": TELEGRAM_CHANNEL_ID,
         "text": mensagem,
-        "parse_mode": "HTML",
+        "parse_mode": "Markdown",
         "disable_web_page_preview": False
     }
     
     try:
         response = requests.post(url, json=data, timeout=10)
         if response.status_code == 200:
-            print("✅ Alerta enviado para o canal PrimeApe 7!")
+            print("✅ Alerta enviado!")
         else:
-            print(f"❌ Erro ao enviar: {response.text}")
+            print(f"❌ Erro: {response.text}")
     except Exception as e:
-        print(f"❌ Erro na conexão Telegram: {e}")
+        print(f" Erro: {e}")
 
 def buscar_pares_dexscreener():
-    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando novos pares na DexScreener...")
+    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
     pares_validos = []
     
     for rede in REDES:
@@ -90,156 +86,136 @@ def buscar_pares_dexscreener():
             data = response.json()
             pares = data.get('pairs', [])
             
-            for par in pares[:50]:
-                if aplicar_todos_filtros(par):
+            for par in pares[:100]:
+                if aplicar_filtros(par):
                     pares_validos.append(par)
                     
         except Exception as e:
-            print(f"  ⚠️ Erro ao buscar {rede}: {e}")
+            print(f"  ⚠️ Erro {rede}: {e}")
             
     return pares_validos
 
-def aplicar_todos_filtros(par):
-    """Aplica os 5 filtros do Peneirão PrimeApe"""
-    
-    # Filtro 1: Liquidez < $1k -> Descartado
+def aplicar_filtros(par):
+    # Filtro 1: Liquidez mínima $5k
     liquidez = par.get('liquidity', {}).get('usd', 0)
-    if not liquidez or liquidez < 1000:
+    if not liquidez or liquidez < 5000:
         return False
-        
-    # Filtro 2: Volume > 10% do Market Cap -> Descartado (Wash Trading)
-    volume_24h = par.get('volume', {}).get('h24', 0)
-    market_cap = par.get('fdv', 0) or par.get('marketCap', 0)
     
-    if market_cap and market_cap > 0:
+    # Filtro 2: Market Cap mínimo $10k (NOVO)
+    market_cap = par.get('fdv', 0) or par.get('marketCap', 0)
+    if not market_cap or market_cap < 10000:
+        return False
+    
+    # Filtro 3: Volume < 10% do MC (wash trading)
+    volume_24h = par.get('volume', {}).get('h24', 0)
+    if volume_24h > 0:
         ratio = volume_24h / market_cap
         if ratio > 0.10:
             return False
-            
-    # Filtro 3: Pump > 5% em 1h -> Descartado
+    
+    # Filtro 4: Pump máximo 10% em 1h (era 5%)
     pump_1h = par.get('priceChange', {}).get('h1', 0)
-    if pump_1h > 5.0:
+    if pump_1h > 10.0:
         return False
     
-    # Filtro 4: Contrato verificado (heurística básica)
-    info_token = par.get('info', {})
-    # Não descartamos só por isso, DexScreener nem sempre tem
-    
-    # Filtro 5: Liquidez mínima de $5k (proxy para holders)
-    if liquidez < 5000:
+    # Filtro 5: Volume mínimo $1k (evita pares muito novos)
+    if volume_24h < 1000:
         return False
         
     return True
 
 def classificar_oportunidade(num_canais):
-    """Classifica a oportunidade em níveis"""
     if num_canais >= 2:
-        return 1, "🔥 ALTA CONFIANÇA"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, "💎 OPORTUNIDADE"
+        return 2, "🥈 OPPORTUNITY"
     else:
-        return 3, "🚀 GEM ESCONDIDA"
+        return 3, "🥉 HIDDEN GEM"
 
 def formatar_alerta(par, nivel, canais_mencionados):
-    """Formata mensagem bonita para o Telegram"""
     token_symbol = par.get('baseToken', {}).get('symbol', 'Unknown')
-    quote_symbol = par.get('quoteToken', {}).get('symbol', 'Unknown')
     ca = par.get('pairAddress', 'N/A')
     rede = par.get('chainId', 'N/A').upper()
     liquidez = par.get('liquidity', {}).get('usd', 0)
     pump_1h = par.get('priceChange', {}).get('h1', 0)
     volume_24h = par.get('volume', {}).get('h24', 0)
+    market_cap = par.get('fdv', 0) or par.get('marketCap', 0)
     price = par.get('priceUsd', '0')
     
-    # Formatar preço corretamente
     try:
         price_formatted = f"${float(price):.8f}" if price and price != '0' else "N/A"
     except:
         price_formatted = "N/A"
     
-    # Emoji baseado no nível
-    emojis = {1: "🔥", 2: "", 3: "🚀"}
-    emoji = emojis.get(nivel, "🦍")
-    
-    # Link do DexScreener
-    dex_link = f"https://dexscreener.com/{rede.lower()}/{ca}"
-    
-    # Info dos canais
-    canais_info = ""
-    if canais_mencionados:
-        canais_info = f"\n📢 <b>Mencionado em:</b> {', '.join(['@'+c for c in canais_mencionados])}"
-    
-    # Descrição do nível
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+    titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
-        1: "<b>ALTA CONFIANÇA</b> - Múltiplos canais estão falando!",
-        2: "<b>OPORTUNIDADE</b> - Um canal identificou!",
-        3: "<b>GEM ESCONDIDA</b> - Ninguém está falando ainda! Alpha puro!"
+        1: "Multiple alpha channels talking!",
+        2: "One alpha channel spotted it!",
+        3: "Nobody talking yet! Pure alpha!"
     }
     
-    mensagem = f"""{emoji} <b>PRIMEAPE 7 - {nivel}º NÍVEL DETECTADO</b> {emoji}
+    dex_link = f"https://dexscreener.com/{rede.lower()}/{ca}"
+    
+    canais_info = ""
+    if canais_mencionados:
+        canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
+    
+    mensagem = f"""{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}
 
 {descricoes[nivel]}
 {canais_info}
 
-🪙 <b>Token:</b> {token_symbol}/{quote_symbol}
-🔗 <b>CA:</b> <code>{ca}</code>
-🌐 <b>Rede:</b> {rede}
-💰 <b>Preço:</b> {price_formatted}
- <b>Liquidez:</b> ${liquidez:,.2f}
-📊 <b>Volume 24h:</b> ${volume_24h:,.2f}
-📈 <b>Pump 1h:</b> {pump_1h}%
+ {dex_link}
 
-✅ <b>Filtros PrimeApe:</b>
-• Liquidez > $1k
-• Volume OK (sem wash trading)
-• Pump aceitável
-• Liquidez mínima $5k
+🥇 *Token:* #{token_symbol} ({token_symbol})
+*CA:* `{ca}`
+*Chain:* {rede}
+*Price:* {price_formatted}
+*Market Cap:* ${market_cap:,.2f}
+*Liquidity:* ${liquidez:,.2f}
+*Vol 24h:* ${volume_24h:,.2f}
+*Pump 1h:* {pump_1h}%
 
-🔍 <a href="{dex_link}">Ver no DexScreener</a>
+✅ *Filters:*
+• Liquidity > $5k
+• Market Cap > $10k
+• Volume OK
+• Pump < 10%
+• Pair age > 1h
 
-⚠️ <i>Faça sua própria pesquisa (DYOR)!</i>"""
+️ _DYOR!_"""
 
     return mensagem
 
 async def main():
-    print(" PrimeApe 7 - Crypto Radar Bot Iniciado...")
-    print("=" * 60)
+    print(" PrimeApe 7 Iniciado...")
     
-    # Buscar e filtrar pares
     oportunidades = buscar_pares_dexscreener()
+    print(f"\n🎯 {len(oportunidades)} oportunidades!")
     
-    print(f"\n {len(oportunidades)} oportunidades passaram nos filtros!")
-    print("=" * 60)
+    # Ordenar por qualidade
+    oportunidades.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
     
-    # Processar cada oportunidade
     if oportunidades:
-        for i, op in enumerate(oportunidades[:3], 1):  # Limita a 3 alertas por execução
+        for i, op in enumerate(oportunidades[:3], 1):
             token = op.get('baseToken', {}).get('symbol', 'Unknown')
             ca = op.get('pairAddress', 'N/A')
             
-            print(f"\n[{i}/{len(oportunidades[:3])}] Verificando: {token}")
+            print(f"\n[{i}/3] {token}")
             
-            # Verificar canais do Telegram
             num_canais, canais_mencionados = await verificar_canais_telegram(ca)
+            nivel, _ = classificar_oportunidade(num_canais)
             
-            # Classificar
-            nivel, classificacao = classificar_oportunidade(num_canais)
-            
-            print(f"  Nível {nivel} - {classificacao}")
-            print(f"  Canais: {len(canais_mencionados)} menções")
-            
-            # Formatar e enviar
             mensagem = formatar_alerta(op, nivel, canais_mencionados)
             enviar_alerta_telegram(mensagem)
             
-            # Pausa entre envios
             import time
             time.sleep(2)
     else:
-        print("Nenhuma oportunidade encontrada nesta rodada.")
-        enviar_alerta_telegram("<b>PrimeApe 7</b>\n\n🔍 Nenhuma oportunidade validada nos últimos 15 minutos.\n\n<i>O radar continua ativo!</i>")
+        enviar_alerta_telegram("*PrimeApe 7*\n\n No opportunities found.\n\n_Radar active!_")
 
-    print("\n✅ Fim da execução.")
+    print("\n✅ Fim.")
 
 if __name__ == "__main__":
     asyncio.run(main())
