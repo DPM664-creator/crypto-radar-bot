@@ -80,7 +80,7 @@ def enviar_alerta_telegram(mensagem):
         print(f"❌ Erro na conexão Telegram: {e}")
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando novos pares na DexScreener...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando novos pares na DexScreener...")
     pares_validos = []
     
     for rede in REDES:
@@ -151,8 +151,14 @@ def formatar_alerta(par, nivel, canais_mencionados):
     volume_24h = par.get('volume', {}).get('h24', 0)
     price = par.get('priceUsd', '0')
     
+    # Formatar preço corretamente
+    try:
+        price_formatted = f"${float(price):.8f}" if price and price != '0' else "N/A"
+    except:
+        price_formatted = "N/A"
+    
     # Emoji baseado no nível
-    emojis = {1: "🔥", 2: "💎", 3: "🚀"}
+    emojis = {1: "🔥", 2: "", 3: "🚀"}
     emoji = emojis.get(nivel, "🦍")
     
     # Link do DexScreener
@@ -178,9 +184,9 @@ def formatar_alerta(par, nivel, canais_mencionados):
 🪙 <b>Token:</b> {token_symbol}/{quote_symbol}
 🔗 <b>CA:</b> <code>{ca}</code>
 🌐 <b>Rede:</b> {rede}
-💰 <b>Preço:</b> ${float(price):.8f} if price else 'N/A'}
-💧 <b>Liquidez:</b> ${liquidez:,.2f}
- <b>Volume 24h:</b> ${volume_24h:,.2f}
+💰 <b>Preço:</b> {price_formatted}
+ <b>Liquidez:</b> ${liquidez:,.2f}
+📊 <b>Volume 24h:</b> ${volume_24h:,.2f}
 📈 <b>Pump 1h:</b> {pump_1h}%
 
 ✅ <b>Filtros PrimeApe:</b>
@@ -196,13 +202,13 @@ def formatar_alerta(par, nivel, canais_mencionados):
     return mensagem
 
 async def main():
-    print("🦍 PrimeApe 7 - Crypto Radar Bot Iniciado...")
+    print(" PrimeApe 7 - Crypto Radar Bot Iniciado...")
     print("=" * 60)
     
     # Buscar e filtrar pares
     oportunidades = buscar_pares_dexscreener()
     
-    print(f"\n🎯 {len(oportunidades)} oportunidades passaram nos filtros!")
+    print(f"\n {len(oportunidades)} oportunidades passaram nos filtros!")
     print("=" * 60)
     
     # Processar cada oportunidade
@@ -231,7 +237,7 @@ async def main():
             time.sleep(2)
     else:
         print("Nenhuma oportunidade encontrada nesta rodada.")
-        enviar_alerta_telegram(" <b>PrimeApe 7</b>\n\n🔍 Nenhuma oportunidade validada nos últimos 15 minutos.\n\n<i>O radar continua ativo!</i>")
+        enviar_alerta_telegram("<b>PrimeApe 7</b>\n\n🔍 Nenhuma oportunidade validada nos últimos 15 minutos.\n\n<i>O radar continua ativo!</i>")
 
     print("\n✅ Fim da execução.")
 
