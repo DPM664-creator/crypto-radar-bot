@@ -1,6 +1,7 @@
 import requests
 import os
 import asyncio
+import json
 from datetime import datetime
 from telethon import TelegramClient
 
@@ -23,6 +24,23 @@ CANAIS_ALPHA = [
 ]
 
 REDES = ["solana", "ethereum", "bsc", "base"]
+SENT_CAS_FILE = "sent_cas.json"
+
+def carregar_cas_enviados():
+    """Carrega lista de CAs já enviados"""
+    if os.path.exists(SENT_CAS_FILE):
+        try:
+            with open(SENT_CAS_FILE, 'r') as f:
+                data = json.load(f)
+                return data.get('cas_enviados', [])
+        except:
+            return []
+    return []
+
+def salvar_cas_enviados(cas_enviados):
+    """Salva lista de CAs enviados"""
+    with open(SENT_CAS_FILE, 'w') as f:
+        json.dump({'cas_enviados': cas_enviados}, f, indent=2)
 
 async def verificar_canais_telegram(ca_address):
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH]):
@@ -130,7 +148,7 @@ def classificar_oportunidade(num_canais):
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
-        return 3, " HIDDEN GEM"
+        return 3, "🥉 HIDDEN GEM"
 
 def formatar_alerta(par, nivel, canais_mencionados):
     token_symbol = par.get('baseToken', {}).get('symbol', 'Unknown')
@@ -147,7 +165,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     except:
         price_formatted = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
         1: "Multiple alpha channels talking!",
@@ -155,16 +173,14 @@ def formatar_alerta(par, nivel, canais_mencionados):
         3: "Nobody talking yet! Pure alpha!"
     }
     
-    # Link DexScreener coberto (apenas texto clicável)
     dex_link = f"[DexScreener](https://dexscreener.com/{rede.lower()}/{ca})"
     
-    # Layout NOVO conforme solicitado
     mensagem = (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n"
         f"\n"
-        f"📌 *{descricoes[nivel]}*\n"
+        f" *{descricoes[nivel]}*\n"
         f"\n"
-        f"🥇 *Token:* #{token_symbol} ({token_symbol})\n"
+        f" *Token:* #{token_symbol} ({token_symbol})\n"
         f"*CA:* `{ca}`\n"
         f"*Chain:* {rede}\n"
         f"*Price:* {price_formatted}\n"
@@ -181,16 +197,25 @@ def formatar_alerta(par, nivel, canais_mencionados):
     return mensagem
 
 async def main():
-    print("🦍 PrimeApe 7 Iniciado...")
+    print(" PrimeApe 7 Iniciado...")
+    
+    # Carregar CAs já enviados
+    cas_enviados = carregar_cas_enviados()
+    print(f"📋 {len(cas_enviados)} CAs já enviados anteriormente")
     
     oportunidades = buscar_pares_dexscreener()
-    print(f"\n🎯 {len(oportunidades)} oportunidades!")
+    print(f"🎯 {len(oportunidades)} oportunidades encontradas!")
+    
+    # Filtrar apenas CAs NOVOS (não enviados antes)
+    oportunidades_novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
+    print(f"✨ {len(oportunidades_novas)} oportunidades NOVAS (não repetidas)")
     
     # Ordenar por qualidade
-    oportunidades.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
+    oportunidades_novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
     
-    if oportunidades:
-        for i, op in enumerate(oportunidades[:3], 1):
+    if oportunidades_novas:
+        novos_cas = []
+        for i, op in enumerate(oportunidades_novas[:3], 1):
             token = op.get('baseToken', {}).get('symbol', 'Unknown')
             ca = op.get('pairAddress', 'N/A')
             
@@ -202,10 +227,18 @@ async def main():
             mensagem = formatar_alerta(op, nivel, canais_mencionados)
             enviar_alerta_telegram(mensagem)
             
+            novos_cas.append(ca)
+            
             import time
             time.sleep(2)
+        
+        # Adicionar novos CAs à lista e salvar
+        cas_enviados.extend(novos_cas)
+        salvar_cas_enviados(cas_enviados)
+        print(f"\n💾 {len(novos_cas)} novos CAs salvos na memória")
     else:
-        enviar_alerta_telegram("*PrimeApe 7*\n\n No opportunities found.\n\n_The radar is still active!_")
+        print("\n🔄 Nenhuma oportunidade nova nesta rodada")
+        enviar_alerta_telegram("*PrimeApe 7*\n\n🔍 No new opportunities found.\n\n_The radar is still active!_")
 
     print("\n✅ Fim.")
 
