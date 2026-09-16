@@ -47,7 +47,7 @@ def salvar_cas_enviados(cas_enviados):
         json.dump({'cas_enviados': cas_enviados}, f, indent=2)
 
 def commitar_no_github():
-    """Envia o arquivo atualizado para o GitHub para não perder a memória"""
+    """Envia o arquivo atualizado para o GitHub"""
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
         print("⚠️ Tokens do GitHub não configurados")
         return
@@ -64,25 +64,31 @@ def commitar_no_github():
             'Accept': 'application/vnd.github.v3+json'
         }
         
-        # Pega o SHA atual do arquivo
+        # Tenta pegar o SHA atual
         response = requests.get(url, headers=headers)
+        
         if response.status_code == 200:
+            # Arquivo existe, atualiza
             sha = response.json()['sha']
-            
-            # Atualiza o arquivo
             data = {
                 'message': f'Update sent CAs - {datetime.now().strftime("%H:%M:%S")}',
                 'content': content_b64,
                 'sha': sha
             }
-            
             response = requests.put(url, headers=headers, json=data)
-            if response.status_code == 200:
-                print("✅ Memória salva no GitHub com sucesso!")
-            else:
-                print(f" Erro ao salvar no GitHub: {response.text}")
+        elif response.status_code == 404:
+            # Arquivo não existe, cria
+            data = {
+                'message': f'Create sent CAs file - {datetime.now().strftime("%H:%M:%S")}',
+                'content': content_b64
+            }
+            response = requests.put(url, headers=headers, json=data)
+        
+        if response.status_code in [200, 201]:
+            print("✅ Memória salva no GitHub com sucesso!")
         else:
-            print(f"❌ Erro ao buscar SHA: {response.text}")
+            print(f"❌ Erro ao salvar no GitHub: {response.text}")
+            
     except Exception as e:
         print(f"❌ Erro no commit: {e}")
 
@@ -153,7 +159,7 @@ def buscar_pares_dexscreener():
                     pares_validos.append(par)
                     
         except Exception as e:
-            print(f"  ️ Erro {rede}: {e}")
+            print(f"  ⚠️ Erro {rede}: {e}")
             
     return pares_validos
 
@@ -183,7 +189,7 @@ def aplicar_filtros(par):
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, " HIGH CONFIDENCE"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
@@ -236,7 +242,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     return mensagem
 
 async def main():
-    print("🦍 PrimeApe 7 Iniciado...")
+    print(" PrimeApe 7 Iniciado...")
     
     # 1. Carregar memória
     cas_enviados = carregar_cas_enviados()
@@ -278,7 +284,7 @@ async def main():
         commitar_no_github()
         print(f"\n💾 {len(novos_cas)} novos CAs salvos na memória")
     else:
-        print("\n🔄 Nenhuma oportunidade nova nesta rodada")
+        print("\n Nenhuma oportunidade nova nesta rodada")
         enviar_alerta_telegram("*PrimeApe 7*\n\n🔍 No new opportunities found.\n\n_The radar is still active!_")
 
     print("\n✅ Fim.")
