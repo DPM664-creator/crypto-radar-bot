@@ -2,6 +2,7 @@ import requests
 import os
 import asyncio
 import json
+import base64
 from datetime import datetime
 from telethon import TelegramClient
 
@@ -10,6 +11,9 @@ TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
+PAT_TOKEN = os.getenv('PAT_TOKEN')
+REPO_OWNER = os.getenv('REPO_OWNER')
+REPO_NAME = os.getenv('REPO_NAME')
 
 CANAIS_ALPHA = [
     'mad_apes_gambles',
@@ -38,9 +42,49 @@ def carregar_cas_enviados():
     return []
 
 def salvar_cas_enviados(cas_enviados):
-    """Salva lista de CAs enviados"""
+    """Salva lista de CAs enviados localmente"""
     with open(SENT_CAS_FILE, 'w') as f:
         json.dump({'cas_enviados': cas_enviados}, f, indent=2)
+
+def commitar_no_github():
+    """Envia o arquivo atualizado para o GitHub para não perder a memória"""
+    if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
+        print("⚠️ Tokens do GitHub não configurados")
+        return
+    
+    try:
+        with open(SENT_CAS_FILE, 'r') as f:
+            content = f.read()
+        
+        content_b64 = base64.b64encode(content.encode()).decode()
+        
+        url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{SENT_CAS_FILE}"
+        headers = {
+            'Authorization': f'token {PAT_TOKEN}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        # Pega o SHA atual do arquivo
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            sha = response.json()['sha']
+            
+            # Atualiza o arquivo
+            data = {
+                'message': f'Update sent CAs - {datetime.now().strftime("%H:%M:%S")}',
+                'content': content_b64,
+                'sha': sha
+            }
+            
+            response = requests.put(url, headers=headers, json=data)
+            if response.status_code == 200:
+                print("✅ Memória salva no GitHub com sucesso!")
+            else:
+                print(f" Erro ao salvar no GitHub: {response.text}")
+        else:
+            print(f"❌ Erro ao buscar SHA: {response.text}")
+    except Exception as e:
+        print(f"❌ Erro no commit: {e}")
 
 async def verificar_canais_telegram(ca_address):
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH]):
@@ -91,10 +135,10 @@ def enviar_alerta_telegram(mensagem):
         else:
             print(f"❌ Erro: {response.text}")
     except Exception as e:
-        print(f" Erro: {e}")
+        print(f"❌ Erro: {e}")
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
     pares_validos = []
     
     for rede in REDES:
@@ -109,34 +153,29 @@ def buscar_pares_dexscreener():
                     pares_validos.append(par)
                     
         except Exception as e:
-            print(f"  ⚠️ Erro {rede}: {e}")
+            print(f"  ️ Erro {rede}: {e}")
             
     return pares_validos
 
 def aplicar_filtros(par):
-    # Filtro 1: Liquidez mínima $5k
     liquidez = par.get('liquidity', {}).get('usd', 0)
     if not liquidez or liquidez < 5000:
         return False
     
-    # Filtro 2: Market Cap mínimo $10k
     market_cap = par.get('fdv', 0) or par.get('marketCap', 0)
     if not market_cap or market_cap < 10000:
         return False
     
-    # Filtro 3: Volume < 10% do MC (wash trading)
     volume_24h = par.get('volume', {}).get('h24', 0)
     if volume_24h > 0:
         ratio = volume_24h / market_cap
         if ratio > 0.10:
             return False
     
-    # Filtro 4: Pump máximo 10% em 1h
     pump_1h = par.get('priceChange', {}).get('h1', 0)
     if pump_1h > 10.0:
         return False
     
-    # Filtro 5: Volume mínimo $1k (evita pares muito novos)
     if volume_24h < 1000:
         return False
         
@@ -144,7 +183,7 @@ def aplicar_filtros(par):
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, "🥇 HIGH CONFIDENCE"
+        return 1, " HIGH CONFIDENCE"
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
@@ -165,7 +204,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     except:
         price_formatted = "N/A"
     
-    emojis = {1: "🥇", 2: "", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: ""}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
         1: "Multiple alpha channels talking!",
@@ -178,9 +217,9 @@ def formatar_alerta(par, nivel, canais_mencionados):
     mensagem = (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n"
         f"\n"
-        f" *{descricoes[nivel]}*\n"
+        f"📌 *{descricoes[nivel]}*\n"
         f"\n"
-        f" *Token:* #{token_symbol} ({token_symbol})\n"
+        f"🥇 *Token:* #{token_symbol} ({token_symbol})\n"
         f"*CA:* `{ca}`\n"
         f"*Chain:* {rede}\n"
         f"*Price:* {price_formatted}\n"
@@ -197,20 +236,21 @@ def formatar_alerta(par, nivel, canais_mencionados):
     return mensagem
 
 async def main():
-    print(" PrimeApe 7 Iniciado...")
+    print("🦍 PrimeApe 7 Iniciado...")
     
-    # Carregar CAs já enviados
+    # 1. Carregar memória
     cas_enviados = carregar_cas_enviados()
     print(f"📋 {len(cas_enviados)} CAs já enviados anteriormente")
     
+    # 2. Buscar novos
     oportunidades = buscar_pares_dexscreener()
-    print(f"🎯 {len(oportunidades)} oportunidades encontradas!")
+    print(f"🎯 {len(oportunidades)} oportunidades encontradas nos filtros!")
     
-    # Filtrar apenas CAs NOVOS (não enviados antes)
+    # 3. Filtrar repetidos
     oportunidades_novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
-    print(f"✨ {len(oportunidades_novas)} oportunidades NOVAS (não repetidas)")
+    print(f"✨ {len(oportunidades_novas)} oportunidades NOVAS (sem repetição)")
     
-    # Ordenar por qualidade
+    # 4. Ordenar e enviar top 3
     oportunidades_novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
     
     if oportunidades_novas:
@@ -232,9 +272,10 @@ async def main():
             import time
             time.sleep(2)
         
-        # Adicionar novos CAs à lista e salvar
+        # 5. Salvar na memória e commitar no GitHub
         cas_enviados.extend(novos_cas)
         salvar_cas_enviados(cas_enviados)
+        commitar_no_github()
         print(f"\n💾 {len(novos_cas)} novos CAs salvos na memória")
     else:
         print("\n🔄 Nenhuma oportunidade nova nesta rodada")
