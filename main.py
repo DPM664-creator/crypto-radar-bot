@@ -21,7 +21,6 @@ CANAIS_ALPHA = [
     'ghastlygems', 'uranusX100', 'ramcalls'
 ]
 
-# BSC incluído e priorizado
 REDES = ["solana", "ethereum", "bsc", "base"]
 SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
@@ -32,7 +31,8 @@ def carregar_cas_enviados():
         try:
             with open(SENT_CAS_FILE, 'r') as f:
                 return json.load(f).get('cas_enviados', [])
-        except: return []
+        except:
+            return []
     return []
 
 def salvar_cas_enviados(cas_enviados):
@@ -41,16 +41,265 @@ def salvar_cas_enviados(cas_enviados):
 
 def commitar_no_github():
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
-        print("️ Tokens do GitHub não configurados")
+        print("⚠️ Tokens do GitHub não configurados")
         return
     
     for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE]:
-        if not os.path.exists(arquivo): continue
+        if not os.path.exists(arquivo):
+            continue
         try:
-            with open(arquivo, 'r') as f: content = f.read()
+            with open(arquivo, 'r') as f:
+                content = f.read()
             content_b64 = base64.b64encode(content.encode()).decode()
             url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{arquivo}"
             headers = {'Authorization': f'token {PAT_TOKEN}', 'Accept': 'application/vnd.github.v3+json'}
             
             response = requests.get(url, headers=headers)
-            sha = response.json()['sha']
+            sha = None
+            if response.status_code == 200:
+                sha = response.json()['sha']
+            
+            data = {'message': f'Update {arquivo}', 'content': content_b64}
+            if sha:
+                data['sha'] = sha
+            
+            requests.put(url, headers=headers, json=data)
+            print(f"✅ {arquivo} salvo no GitHub!")
+        except Exception as e:
+            print(f"❌ Erro ao salvar {arquivo}: {e}")
+
+# --- FUNÇÕES DO MARKET PULSE ---
+def get_preco_global():
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin&vs_currencies=usd&include_24hr_change=true"
+        resp = requests.get(url, timeout=10).json()
+        return {
+            'BTC': resp['bitcoin'], 'ETH': resp['ethereum'],
+            'SOL': resp['solana'], 'BNB': resp['binancecoin']
+        }
+    except:
+        return None
+
+def get_top_movers():
+    movers = []
+    for rede in REDES:
+        try:
+            url = f"https://api.dexscreener.com/latest/dex/search?q={rede}"
+            pares = requests.get(url, timeout=10).json().get('pairs', [])
+            for p in pares[:50]:
+                liq = p.get('liquidity', {}).get('usd', 0)
+                pump = p.get('priceChange', {}).get('h24', 0)
+                vol = p.get('volume', {}).get('h24', 0)
+                if 20 < pump < 100 and liq > 10000 and vol > 50000:
+                    movers.append({
+                        'symbol': p.get('baseToken', {}).get('symbol', '?'),
+                        'chain': p.get('chainId', '?').upper(),
+                        'pump': pump, 'liq': liq
+                    })
+        except:
+            continue
+    
+    movers.sort(key=lambda x: x['pump'], reverse=True)
+    return movers[:3]
+
+def enviar_market_pulse():
+    print(" Enviando Market Pulse...")
+    precos = get_preco_global()
+    movers = get_top_movers()
+    
+    msg = " *PRIMEAPE 7 - MARKET PULSE*\n\n"
+    
+    if precos:
+        msg += "📊 *Global Market:*\n"
+        for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
+            change = v.get('usd_24h_change', 0)
+            emoji = "🟢" if change >= 0 else "🔴"
+            msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
+        msg += "\n"
+    
+    if movers:
+        msg += "🔥 *Top Healthy Movers (24h):*\n"
+        for i, m in enumerate(movers, 1):
+            msg += f"{i}. *{m['symbol']}* ({m['chain']}) +{m['pump']:.0f}% | Liq: ${m['liq']:,.0f}\n"
+        msg += "\n"
+    
+    msg += "📡 *Radar Status:*\n"
+    msg += "• Scanning: SOL, ETH, BSC, BASE\n"
+    msg += "• Filters: MC > $10k, Liq > $5k, Pump < 10%\n"
+    msg += "• Next alpha scan in 15 min...\n\n"
+    msg += "🔔 _Turn on notifications!_"
+    
+    enviar_alerta_telegram(msg)
+
+def verificar_pulse_horario():
+    hora_atual = datetime.now().hour
+    hora_salva = -1
+    if os.path.exists(PULSE_CONTROL_FILE):
+        try:
+            hora_salva = int(open(PULSE_CONTROL_FILE).read())
+        except:
+            pass
+    
+    if hora_atual != hora_salva:
+        with open(PULSE_CONTROL_FILE, 'w') as f:
+            f.write(str(hora_atual))
+        return True
+    return False
+
+# --- FUNÇÕES PRINCIPAIS ---
+async def verificar_canais_telegram(ca_address):
+    if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH]):
+        return 0, []
+    canais_que_mencionaram = []
+    try:
+        client = TelegramClient('primeape_session', TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        await client.start()
+        for canal in CANAIS_ALPHA:
+            try:
+                async for message in client.iter_messages(canal, limit=50):
+                    if ca_address.lower() in message.text.lower():
+                        if canal not in canais_que_mencionaram:
+                            canais_que_mencionaram.append(canal)
+                        break
+            except:
+                continue
+        await client.disconnect()
+    except:
+        pass
+    return len(canais_que_mencionaram), canais_que_mencionaram
+
+def enviar_alerta_telegram(mensagem):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {"chat_id": TELEGRAM_CHANNEL_ID, "text": mensagem, "parse_mode": "Markdown", "disable_web_page_preview": False}
+    try:
+        resp = requests.post(url, json=data, timeout=10)
+        if resp.status_code == 200:
+            print("✅ Alerta enviado!")
+        else:
+            print(f" Erro: {resp.text}")
+    except Exception as e:
+        print(f" Erro: {e}")
+
+def buscar_pares_dexscreener():
+    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
+    pares_validos = []
+    for rede in REDES:
+        try:
+            url = f"https://api.dexscreener.com/latest/dex/search?q={rede}"
+            data = requests.get(url, timeout=10).json()
+            pares = data.get('pairs', [])
+            print(f"  🔍 {rede.upper()}: {len(pares)} pares brutos encontrados")
+            for par in pares[:100]:
+                if aplicar_filtros(par):
+                    pares_validos.append(par)
+        except Exception as e:
+            print(f"  ⚠️ Erro {rede}: {e}")
+    return pares_validos
+
+def aplicar_filtros(par):
+    liq = par.get('liquidity', {}).get('usd', 0)
+    mc = par.get('fdv', 0) or par.get('marketCap', 0)
+    vol = par.get('volume', {}).get('h24', 0)
+    pump = par.get('priceChange', {}).get('h1', 0)
+    
+    if not liq or liq < 5000:
+        return False
+    if not mc or mc < 10000:
+        return False
+    if vol > 0 and mc > 0 and (vol / mc) > 0.10:
+        return False
+    if pump > 10.0:
+        return False
+    if vol < 1000:
+        return False
+    return True
+
+def classificar_oportunidade(num_canais):
+    if num_canais >= 2:
+        return 1, " HIGH CONFIDENCE"
+    elif num_canais == 1:
+        return 2, "🥈 OPPORTUNITY"
+    else:
+        return 3, "🥉 HIDDEN GEM"
+
+def formatar_alerta(par, nivel, canais_mencionados):
+    token = par.get('baseToken', {}).get('symbol', 'Unknown')
+    ca = par.get('pairAddress', 'N/A')
+    rede = par.get('chainId', 'N/A').upper()
+    liq = par.get('liquidity', {}).get('usd', 0)
+    pump = par.get('priceChange', {}).get('h1', 0)
+    vol = par.get('volume', {}).get('h24', 0)
+    mc = par.get('fdv', 0) or par.get('marketCap', 0)
+    price = par.get('priceUsd', '0')
+    
+    try:
+        price_fmt = f"${float(price):.8f}" if price and price != '0' else "N/A"
+    except:
+        price_fmt = "N/A"
+    
+    emojis = {1: "🥇", 2: "🥈", 3: ""}
+    titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
+    descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
+    
+    dex_link = f"[DexScreener](https://dexscreener.com/{rede.lower()}/{ca})"
+    
+    canais_info = ""
+    if canais_mencionados:
+        canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
+    
+    return (
+        f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
+        f"📌 *{descricoes[nivel]}*\n{canais_info}\n\n"
+        f"🥇 *Token:* #{token} ({token})\n*CA:* `{ca}`\n*Chain:* {rede}\n"
+        f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
+        f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n\n"
+        f"{dex_link}\n\n️ _DYOR!_"
+    )
+
+async def main():
+    print("🦍 PrimeApe 7 Iniciado...")
+    
+    # 1. Market Pulse (se for a hora)
+    if verificar_pulse_horario():
+        enviar_market_pulse()
+    
+    # 2. Scan de Oportunidades
+    cas_enviados = carregar_cas_enviados()
+    print(f"📋 {len(cas_enviados)} CAs na memória")
+    
+    oportunidades = buscar_pares_dexscreener()
+    print(f"🎯 {len(oportunidades)} oportunidades nos filtros!")
+    
+    novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
+    print(f"✨ {len(novas)} oportunidades NOVAS")
+    
+    novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
+    
+    if novas:
+        novos_cas = []
+        for i, op in enumerate(novas[:3], 1):
+            token = op.get('baseToken', {}).get('symbol', 'Unknown')
+            ca = op.get('pairAddress', 'N/A')
+            print(f"\n[{i}/3] {token} ({op.get('chainId', '?').upper()})")
+            
+            num_canais, mencoes = await verificar_canais_telegram(ca)
+            nivel, _ = classificar_oportunidade(num_canais)
+            
+            enviar_alerta_telegram(formatar_alerta(op, nivel, mencoes))
+            novos_cas.append(ca)
+            import time
+            time.sleep(2)
+        
+        cas_enviados.extend(novos_cas)
+        salvar_cas_enviados(cas_enviados)
+        print(f"\n💾 {len(novos_cas)} novos CAs salvos")
+    else:
+        print("\n🔄 Nenhuma oportunidade nova")
+        
+    commitar_no_github()
+    print("\n✅ Fim.")
+
+if __name__ == "__main__":
+    asyncio.run(main())
