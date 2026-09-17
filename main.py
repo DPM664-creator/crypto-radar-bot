@@ -15,10 +15,23 @@ PAT_TOKEN = os.getenv('PAT_TOKEN')
 REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
 
+# LISTA COMPLETA DE CANAIS ALPHA (Originais + Novos)
 CANAIS_ALPHA = [
+    # Originais
     'mad_apes_gambles', 'TheDonsCalls', 'TheSolitairePrestige',
     'gubbinscalls', 'mad_apes', 'sadcatgamble',
-    'ghastlygems', 'uranusX100', 'ramcalls'
+    'ghastlygems', 'uranusX100', 'ramcalls',
+    
+    # Novos Aprovados e em Observação
+    'gogetacalls',      # Top Tier Solana/Base
+    'dylansdegens',     # Alpha curado
+    'TWOSICCsPICCs',    # Low-cap gems
+    'marcellcooks',     # Narrativa + CA
+    'roobbiee',         # Em observação (promoções)
+    'ancientkols',      # Em observação (russo/cis?)
+    'ThanosGems',       # Em observação (frequência baixa)
+    'BullishCallsPremium', # Em observação (risco spam)
+    'dr_crypto_channel'    # Em observação (genérico)
 ]
 
 REDES = ["solana", "ethereum", "bsc", "base"]
@@ -41,7 +54,7 @@ def salvar_cas_enviados(cas_enviados):
 
 def commitar_no_github():
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
-        print("⚠️ Tokens do GitHub não configurados")
+        print("️ Tokens do GitHub não configurados")
         return
     
     for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE]:
@@ -107,7 +120,7 @@ def enviar_market_pulse():
     precos = get_preco_global()
     movers = get_top_movers()
     
-    msg = " *PRIMEAPE 7 - MARKET PULSE*\n\n"
+    msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     
     if precos:
         msg += "📊 *Global Market:*\n"
@@ -178,12 +191,12 @@ def enviar_alerta_telegram(mensagem):
         if resp.status_code == 200:
             print("✅ Alerta enviado!")
         else:
-            print(f" Erro: {resp.text}")
+            print(f"❌ Erro: {resp.text}")
     except Exception as e:
-        print(f" Erro: {e}")
+        print(f"❌ Erro: {e}")
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
     pares_validos = []
     for rede in REDES:
         try:
@@ -239,7 +252,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "🥇", 2: "🥈", 3: ""}
+    emojis = {1: "", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
@@ -255,7 +268,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
         f"🥇 *Token:* #{token} ({token})\n*CA:* `{ca}`\n*Chain:* {rede}\n"
         f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
         f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n\n"
-        f"{dex_link}\n\n️ _DYOR!_"
+        f"{dex_link}\n\n⚠️ _DYOR!_"
     )
 
 async def main():
