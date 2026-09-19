@@ -6,6 +6,7 @@ import base64
 from datetime import datetime
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -26,7 +27,7 @@ CANAIS_ALPHA = [
     'gubbinscalls', 'mad_apes', 'sadcatgamble',
     'ghastlygems', 'uranusX100', 'ramcalls',
     
-    # --- NOVOS APROVados (Alpha Curado) ---
+    # --- NOVOS APROVADOS (Alpha Curado) ---
     'gogetacalls', 'dylansdegens', 'TWOSICCsPICCs', 'marcellcooks',
     
     # --- SOLICITADOS POR VOCÊ (Degen/Gems) ---
@@ -50,6 +51,9 @@ REDES = ["solana", "ethereum", "bsc", "base"]
 SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
 DEBUG_REPORT_FILE = "debug_report.html"
+
+# URL DO RELATÓRIO NO GITHUB (será atualizada após commit)
+GITHUB_REPORT_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/blob/main/{DEBUG_REPORT_FILE}"
 
 # TOKENS NATIVOS E STABLECOINS QUE DEVEM SER IGNORADOS
 TOKENS_NATIVOS = [
@@ -138,14 +142,14 @@ def get_top_movers():
     return movers[:3]
 
 def enviar_market_pulse():
-    print("📡 Enviando Market Pulse...")
+    print(" Enviando Market Pulse...")
     precos = get_preco_global()
     movers = get_top_movers()
     
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     
     if precos:
-        msg += " *Global Market:*\n"
+        msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
             emoji = "🟢" if change >= 0 else "🔴"
@@ -153,18 +157,25 @@ def enviar_market_pulse():
         msg += "\n"
     
     if movers:
-        msg += " *Top Healthy Movers (24h):*\n"
+        msg += "🔥 *Top Healthy Movers (24h):*\n"
         for i, m in enumerate(movers, 1):
             msg += f"{i}. *{m['symbol']}* ({m['chain']}) +{m['pump']:.0f}% | Liq: ${m['liq']:,.0f}\n"
         msg += "\n"
     
-    msg += "📡 *Radar Status:*\n"
+    msg += " *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += "• Filters: MC $2k-$500k | Vol $1k+ | Pump 5-200%\n"
     msg += "• Next alpha scan in 15 min...\n\n"
     msg += "🔔 _Turn on notifications!_"
     
-    enviar_alerta_telegram(msg)
+    # Botões para Market Pulse
+    keyboard = [
+        [InlineKeyboardButton(" Ver Relatório Completo", url=GITHUB_REPORT_URL)],
+        [InlineKeyboardButton("🔄 Atualizar", callback_data="refresh_pulse")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    enviar_alerta_telegram_com_botoes(msg, reply_markup)
 
 def verificar_pulse_horario():
     hora_atual = datetime.now().hour
@@ -213,6 +224,7 @@ async def verificar_canais_telegram(ca_address):
     return len(canais_que_mencionaram), canais_que_mencionaram
 
 def enviar_alerta_telegram(mensagem):
+    """Envia alerta sem botões (legado)"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -225,6 +237,27 @@ def enviar_alerta_telegram(mensagem):
             print(f"❌ Erro: {resp.text}")
     except Exception as e:
         print(f"❌ Erro: {e}")
+
+def enviar_alerta_telegram_com_botoes(mensagem, reply_markup):
+    """Envia alerta COM botões inline"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": TELEGRAM_CHANNEL_ID, 
+        "text": mensagem, 
+        "parse_mode": "Markdown", 
+        "disable_web_page_preview": False,
+        "reply_markup": reply_markup.to_json()
+    }
+    try:
+        resp = requests.post(url, json=data, timeout=10)
+        if resp.status_code == 200:
+            print("✅ Alerta com botões enviado!")
+        else:
+            print(f"❌ Erro: {resp.text}")
+    except Exception as e:
+        print(f" Erro: {e}")
 
 def analisar_par(par, rede):
     """Analisa um par e retorna dict com dados + motivo do filtro"""
@@ -346,7 +379,7 @@ def gerar_relatorio_html(analises):
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>🦍 PrimeApe 7 - Relatório de Varredura</title>
+<title> PrimeApe 7 - Relatório de Varredura</title>
 <style>
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
     body {{
@@ -528,7 +561,7 @@ def gerar_relatorio_html(analises):
     
     with open(DEBUG_REPORT_FILE, 'w', encoding='utf-8') as f:
         f.write(html)
-    print(f"📊 Relatório HTML salvo: {DEBUG_REPORT_FILE}")
+    print(f" Relatório HTML salvo: {DEBUG_REPORT_FILE}")
 
 def buscar_pares_dexscreener():
     print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
@@ -564,9 +597,9 @@ def classificar_oportunidade(num_canais):
     else:
         return 3, "🥉 HIDDEN GEM"
 
-def formatar_alerta(par, nivel, canais_mencionados):
+def formatar_alerta_com_botoes(par, nivel, canais_mencionados, ca):
+    """Formata alerta COM botões inline"""
     token = par.get('baseToken', {}).get('symbol', 'Unknown')
-    ca = par.get('pairAddress', 'N/A')
     rede = par.get('chainId', 'N/A').upper()
     liq = par.get('liquidity', {}).get('usd', 0)
     pump = par.get('priceChange', {}).get('h1', 0)
@@ -583,20 +616,32 @@ def formatar_alerta(par, nivel, canais_mencionados):
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
-    dex_link = f"[DexScreener](https://dexscreener.com/{rede.lower()}/{ca})"
+    dex_link = f"https://dexscreener.com/{rede.lower()}/{ca}"
     
     canais_info = ""
     if canais_mencionados:
         canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
     
-    return (
+    msg = (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
         f"📌 *{descricoes[nivel]}*\n{canais_info}\n\n"
         f"🥇 *Token:* #{token} ({token})\n*CA:* `{ca}`\n*Chain:* {rede}\n"
         f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
         f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n\n"
-        f"{dex_link}\n\n⚠️ _DYOR!_"
+        f"[DexScreener]({dex_link})\n\n⚠️ _DYOR!_"
     )
+    
+    # Cria botões inline
+    keyboard = [
+        [
+            InlineKeyboardButton("🔍 DexScreener", url=dex_link),
+            InlineKeyboardButton("📊 Relatório", url=GITHUB_REPORT_URL)
+        ],
+        [InlineKeyboardButton("📋 Copiar CA", callback_data=f"copy_ca:{ca}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    return msg, reply_markup
 
 async def main():
     print("🦍 PrimeApe 7 Iniciado...")
@@ -627,7 +672,10 @@ async def main():
             num_canais, mencoes = await verificar_canais_telegram(ca)
             nivel, _ = classificar_oportunidade(num_canais)
             
-            enviar_alerta_telegram(formatar_alerta(op, nivel, mencoes))
+            # Envia alerta COM botões
+            msg, reply_markup = formatar_alerta_com_botoes(op, nivel, mencoes, ca)
+            enviar_alerta_telegram_com_botoes(msg, reply_markup)
+            
             novos_cas.append(ca)
             import time
             time.sleep(2)
