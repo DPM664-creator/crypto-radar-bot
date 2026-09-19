@@ -5,33 +5,26 @@ import json
 import base64
 from datetime import datetime
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
+TELEGRAM_SESSION_STRING = os.getenv('TELEGRAM_SESSION_STRING')
 PAT_TOKEN = os.getenv('PAT_TOKEN')
 REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
 
-# LISTA COMPLETA DE CANAIS ALPHA (Originais + Novos)
+# LISTA COMPLETA DE CANAIS ALPHA
 CANAIS_ALPHA = [
-    # Originais
     'mad_apes_gambles', 'TheDonsCalls', 'TheSolitairePrestige',
     'gubbinscalls', 'mad_apes', 'sadcatgamble',
     'ghastlygems', 'uranusX100', 'ramcalls',
-    
-    # Novos Aprovados e em Observação
-    'gogetacalls',      # Top Tier Solana/Base
-    'dylansdegens',     # Alpha curado
-    'TWOSICCsPICCs',    # Low-cap gems
-    'marcellcooks',     # Narrativa + CA
-    'roobbiee',         # Em observação (promoções)
-    'ancientkols',      # Em observação (russo/cis?)
-    'ThanosGems',       # Em observação (frequência baixa)
-    'BullishCallsPremium', # Em observação (risco spam)
-    'dr_crypto_channel'    # Em observação (genérico)
+    'gogetacalls', 'dylansdegens', 'TWOSICCsPICCs',
+    'marcellcooks', 'roobbiee', 'ancientkols',
+    'ThanosGems', 'BullishCallsPremium', 'dr_crypto_channel'
 ]
 
 REDES = ["solana", "ethereum", "bsc", "base"]
@@ -54,7 +47,7 @@ def salvar_cas_enviados(cas_enviados):
 
 def commitar_no_github():
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
-        print("️ Tokens do GitHub não configurados")
+        print("⚠️ Tokens do GitHub não configurados")
         return
     
     for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE]:
@@ -116,7 +109,7 @@ def get_top_movers():
     return movers[:3]
 
 def enviar_market_pulse():
-    print(" Enviando Market Pulse...")
+    print("📡 Enviando Market Pulse...")
     precos = get_preco_global()
     movers = get_top_movers()
     
@@ -126,7 +119,7 @@ def enviar_market_pulse():
         msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
-            emoji = "🟢" if change >= 0 else "🔴"
+            emoji = "" if change >= 0 else ""
             msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
         msg += "\n"
     
@@ -140,7 +133,7 @@ def enviar_market_pulse():
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += "• Filters: MC > $10k, Liq > $5k, Pump < 10%\n"
     msg += "• Next alpha scan in 15 min...\n\n"
-    msg += "🔔 _Turn on notifications!_"
+    msg += " _Turn on notifications!_"
     
     enviar_alerta_telegram(msg)
 
@@ -161,12 +154,19 @@ def verificar_pulse_horario():
 
 # --- FUNÇÕES PRINCIPAIS ---
 async def verificar_canais_telegram(ca_address):
-    if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH]):
+    if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING]):
+        print("⚠️ Session string não configurada")
         return 0, []
+    
     canais_que_mencionaram = []
     try:
-        client = TelegramClient('primeape_session', TELEGRAM_API_ID, TELEGRAM_API_HASH)
-        await client.start()
+        client = TelegramClient(StringSession(TELEGRAM_SESSION_STRING), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
+        await client.connect()
+        
+        if not await client.is_user_authorized():
+            print(" Session inválida")
+            return 0, []
+        
         for canal in CANAIS_ALPHA:
             try:
                 async for message in client.iter_messages(canal, limit=50):
@@ -174,11 +174,14 @@ async def verificar_canais_telegram(ca_address):
                         if canal not in canais_que_mencionaram:
                             canais_que_mencionaram.append(canal)
                         break
-            except:
+            except Exception as e:
+                print(f"  ⚠️ Erro ao ler {canal}: {e}")
                 continue
+        
         await client.disconnect()
-    except:
-        pass
+    except Exception as e:
+        print(f"❌ Erro na conexão Telegram: {e}")
+    
     return len(canais_que_mencionaram), canais_que_mencionaram
 
 def enviar_alerta_telegram(mensagem):
@@ -203,7 +206,7 @@ def buscar_pares_dexscreener():
             url = f"https://api.dexscreener.com/latest/dex/search?q={rede}"
             data = requests.get(url, timeout=10).json()
             pares = data.get('pairs', [])
-            print(f"  🔍 {rede.upper()}: {len(pares)} pares brutos encontrados")
+            print(f"   {rede.upper()}: {len(pares)} pares brutos encontrados")
             for par in pares[:100]:
                 if aplicar_filtros(par):
                     pares_validos.append(par)
@@ -231,7 +234,7 @@ def aplicar_filtros(par):
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, " HIGH CONFIDENCE"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
@@ -252,7 +255,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
@@ -309,7 +312,7 @@ async def main():
         salvar_cas_enviados(cas_enviados)
         print(f"\n💾 {len(novos_cas)} novos CAs salvos")
     else:
-        print("\n🔄 Nenhuma oportunidade nova")
+        print("\n Nenhuma oportunidade nova")
         
     commitar_no_github()
     print("\n✅ Fim.")
