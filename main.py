@@ -49,10 +49,6 @@ CANAIS_ALPHA = [
 REDES = ["solana", "ethereum", "bsc", "base"]
 SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
-DEBUG_REPORT_FILE = "debug_report.html"
-
-# URL DO RELATÓRIO NO GITHUB
-GITHUB_REPORT_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/blob/main/{DEBUG_REPORT_FILE}"
 
 # TOKENS NATIVOS E STABLECOINS QUE DEVEM SER IGNORADOS
 TOKENS_NATIVOS = [
@@ -79,11 +75,11 @@ def commitar_no_github():
         print("⚠️ Tokens do GitHub não configurados")
         return
     
-    for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE, DEBUG_REPORT_FILE]:
+    for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE]:
         if not os.path.exists(arquivo):
             continue
         try:
-            with open(arquivo, 'r', encoding='utf-8') as f:
+            with open(arquivo, 'r') as f:
                 content = f.read()
             content_b64 = base64.b64encode(content.encode()).decode()
             url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{arquivo}"
@@ -163,11 +159,18 @@ def enviar_market_pulse():
     
     msg += "📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
-    msg += "• Filters: MC $2k-$500k | Vol $1k+ | Pump 5-200% | <48h\n"
+    msg += "• Filters: MC $500-$5M | Liq $500-$500k | <7 dias\n"
     msg += "• Next alpha scan in 15 min...\n\n"
-    msg += " _Turn on notifications!_"
+    msg += "🔔 _Turn on notifications!_"
     
-    enviar_alerta_telegram(msg)
+    # Botões inline para Market Pulse
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "🔄 Atualizar Agora", "callback_data": "refresh_pulse"}]
+        ]
+    }
+    
+    enviar_alerta_telegram_com_botoes(msg, keyboard)
 
 def verificar_pulse_horario():
     hora_atual = datetime.now().hour
@@ -196,7 +199,7 @@ async def verificar_canais_telegram(ca_address):
         await client.connect()
         
         if not await client.is_user_authorized():
-            print("️ Session inválida")
+            print("⚠️ Session inválida")
             return 0, []
         
         for canal in CANAIS_ALPHA:
@@ -216,6 +219,7 @@ async def verificar_canais_telegram(ca_address):
     return len(canais_que_mencionaram), canais_que_mencionaram
 
 def enviar_alerta_telegram(mensagem):
+    """Envia alerta SEM botões"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -229,64 +233,29 @@ def enviar_alerta_telegram(mensagem):
     except Exception as e:
         print(f"❌ Erro: {e}")
 
-def analisar_par(par, rede):
-    """Analisa um par e retorna dict com dados + motivo do filtro"""
-    liq = par.get('liquidity', {}).get('usd', 0) or 0
-    mc = par.get('fdv', 0) or par.get('marketCap', 0) or 0
-    vol = par.get('volume', {}).get('h24', 0) or 0
-    pump_1h = par.get('priceChange', {}).get('h1', 0) or 0
-    pump_24h = par.get('priceChange', {}).get('h24', 0) or 0
-    
-    base_token = par.get('baseToken', {})
-    symbol = base_token.get('symbol', 'N/A')
-    ca = par.get('pairAddress', 'N/A')
-    price = par.get('priceUsd', '0')
-    
-    # Calcular idade do par
-    pair_created_at = par.get('pairCreatedAt', 0)
-    age_hours = 999
-    if pair_created_at:
-        created_timestamp = pair_created_at / 1000
-        now_timestamp = datetime.now().timestamp()
-        age_hours = (now_timestamp - created_timestamp) / 3600
-    
-    motivos = []
-    if symbol.upper() in TOKENS_NATIVOS:
-        motivos.append("TOKEN NATIVO")
-    if mc < 2000 or mc > 500000:
-        motivos.append(f"MC fora (${mc:,.0f})")
-    if liq < 1000 or liq > 100000:
-        motivos.append(f"Liq fora (${liq:,.0f})")
-    if vol < 1000:
-        motivos.append(f"Vol baixo (${vol:,.0f})")
-    if pump_24h < 5 or pump_24h > 200:
-        motivos.append(f"Pump 24h {pump_24h:+.1f}%")
-    if pump_1h < -20:
-        motivos.append(f"Dump 1h {pump_1h:+.1f}%")
-    if mc > 0 and vol > 0 and (vol / mc < 0.05 or vol / mc > 2.0):
-        motivos.append("Vol/MC desbalanceado")
-    if age_hours > 48:
-        motivos.append(f"Token antigo ({age_hours:.0f}h)")
-    
-    aprovado = len(motivos) == 0
-    
-    return {
-        'rede': rede.upper(),
-        'symbol': symbol,
-        'ca': ca,
-        'mc': mc,
-        'liq': liq,
-        'vol': vol,
-        'pump_1h': pump_1h,
-        'pump_24h': pump_24h,
-        'price': price,
-        'age_hours': age_hours,
-        'aprovado': aprovado,
-        'motivos': motivos
+def enviar_alerta_telegram_com_botoes(mensagem, keyboard):
+    """Envia alerta COM botões inline"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": TELEGRAM_CHANNEL_ID, 
+        "text": mensagem, 
+        "parse_mode": "Markdown", 
+        "disable_web_page_preview": False,
+        "reply_markup": keyboard
     }
+    try:
+        resp = requests.post(url, json=data, timeout=10)
+        if resp.status_code == 200:
+            print("✅ Alerta com botões enviado!")
+        else:
+            print(f"❌ Erro: {resp.text}")
+    except Exception as e:
+        print(f"❌ Erro: {e}")
 
 def aplicar_filtros(par):
-    """Filtros RIGOROSOS para encontrar GEMAS REAIS"""
+    """Filtros RELAXADOS para capturar tokens dos canais"""
     
     # Dados básicos
     liq = par.get('liquidity', {}).get('usd', 0)
@@ -303,28 +272,28 @@ def aplicar_filtros(par):
     if symbol in TOKENS_NATIVOS:
         return False
     
-    # ✅ MARKET CAP: Entre $2k e $500k
-    if not mc or mc < 2000 or mc > 500000:
+    # ✅ MARKET CAP: $500 - $5M (MUITO MAIS AMPLO!)
+    if not mc or mc < 500 or mc > 5000000:
         return False
     
-    # ✅ LIQUIDEZ: Mínimo $1k, máximo $100k
-    if not liq or liq < 1000 or liq > 100000:
+    # ✅ LIQUIDEZ: $500 - $500k (MUITO MAIS AMPLO!)
+    if not liq or liq < 500 or liq > 500000:
         return False
     
-    # ✅ VOLUME: Pelo menos $1k nas últimas 24h
-    if vol < 1000:
+    # ✅ VOLUME: Mínimo $100 (BEM BAIXO!)
+    if vol < 100:
         return False
     
-    # ✅ PUMP 24h: Entre 5% e 200%
-    if pump_24h < 5 or pump_24h > 200:
+    # ✅ PUMP 24h: 0% - 500% (SEM LIMITE SUPERIOR RÍGIDO!)
+    if pump_24h < 0 or pump_24h > 500:
         return False
     
-    # ✅ PUMP 1h: Não pode estar caindo forte (> -20%)
-    if pump_1h < -20:
+    # ✅ PUMP 1h: Não pode estar caindo mais de 50%
+    if pump_1h < -50:
         return False
     
-    # ✅ RAZÃO VOLUME/MC: Entre 0.05 e 2.0
-    if vol / mc < 0.05 or vol / mc > 2.0:
+    # ✅ RAZÃO VOLUME/MC: 0.01 - 5.0 (MUITO MAIS FLEXÍVEL!)
+    if vol / mc < 0.01 or vol / mc > 5.0:
         return False
     
     # ✅ PAR DE NEGOCIAÇÃO: Deve ter endereço válido
@@ -332,256 +301,22 @@ def aplicar_filtros(par):
     if not pair_address or len(pair_address) < 10:
         return False
     
-    # 🆕 FILTRO DE IDADE: Token criado há menos de 48h
+    # ⚠️ FILTRO DE IDADE: Token criado há menos de 7 DIAS (em vez de 48h)
     pair_created_at = par.get('pairCreatedAt', 0)
     if pair_created_at:
-        # pairCreatedAt vem em milissegundos
         created_timestamp = pair_created_at / 1000
         now_timestamp = datetime.now().timestamp()
-        age_hours = (now_timestamp - created_timestamp) / 3600
+        age_days = (now_timestamp - created_timestamp) / 86400
         
-        # Bloqueia tokens com mais de 48h
-        if age_hours > 48:
+        # Bloqueia tokens com mais de 7 dias
+        if age_days > 7:
             return False
-    else:
-        # Se não tem data de criação, bloqueia por segurança
-        return False
     
     return True
-
-def gerar_relatorio_html(analises):
-    """Gera um relatório HTML interativo com todos os pares analisados"""
-    total = len(analises)
-    aprovados = sum(1 for a in analises if a['aprovado'])
-    filtrados = total - aprovados
-    
-    linhas_tabela = ""
-    for i, a in enumerate(analises, 1):
-        status_class = "aprovado" if a['aprovado'] else "filtrado"
-        status_text = "✅ APROVADO" if a['aprovado'] else "❌ FILTRADO"
-        motivos_html = "<br>".join(a['motivos']) if a['motivos'] else "-"
-        dex_link = f"https://dexscreener.com/{a['rede'].lower()}/{a['ca']}"
-        
-        mc_fmt = f"${a['mc']:,.0f}"
-        liq_fmt = f"${a['liq']:,.0f}"
-        vol_fmt = f"${a['vol']:,.0f}"
-        pump_24h_fmt = f"{a['pump_24h']:+.1f}%"
-        pump_1h_fmt = f"{a['pump_1h']:+.1f}%"
-        age_fmt = f"{a['age_hours']:.1f}h"
-        
-        cor_pump_24h = "green" if a['pump_24h'] > 0 else "red"
-        cor_pump_1h = "green" if a['pump_1h'] > 0 else "red"
-        
-        linhas_tabela += f"""
-        <tr class="{status_class}">
-            <td>{i}</td>
-            <td><b>{a['rede']}</b></td>
-            <td><b>{a['symbol']}</b></td>
-            <td><a href="{dex_link}" target="_blank" class="ca-link" title="Ver no DexScreener">{a['ca'][:8]}...{a['ca'][-6:]}</a></td>
-            <td>{mc_fmt}</td>
-            <td>{liq_fmt}</td>
-            <td>{vol_fmt}</td>
-            <td style="color:{cor_pump_24h}"><b>{pump_24h_fmt}</b></td>
-            <td style="color:{cor_pump_1h}"><b>{pump_1h_fmt}</b></td>
-            <td>{age_fmt}</td>
-            <td><span class="status-badge {status_class}">{status_text}</span></td>
-            <td class="motivos">{motivos_html}</td>
-        </tr>
-        """
-    
-    html = f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>🦍 PrimeApe 7 - Relatório de Varredura</title>
-<style>
-    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-    body {{
-        font-family: 'Segoe UI', Tahoma, sans-serif;
-        background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-        color: #fff;
-        padding: 20px;
-        min-height: 100vh;
-    }}
-    .container {{ max-width: 1600px; margin: 0 auto; }}
-    h1 {{
-        text-align: center;
-        font-size: 2.5em;
-        margin-bottom: 10px;
-        background: linear-gradient(90deg, #f7971e, #ffd200);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }}
-    .subtitulo {{
-        text-align: center;
-        color: #aaa;
-        margin-bottom: 30px;
-        font-size: 1.1em;
-    }}
-    .stats {{
-        display: flex;
-        justify-content: center;
-        gap: 20px;
-        margin-bottom: 30px;
-        flex-wrap: wrap;
-    }}
-    .stat-card {{
-        background: rgba(255,255,255,0.1);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
-        padding: 20px 30px;
-        text-align: center;
-        min-width: 150px;
-        border: 1px solid rgba(255,255,255,0.2);
-    }}
-    .stat-card .numero {{
-        font-size: 2.5em;
-        font-weight: bold;
-    }}
-    .stat-card .label {{ color: #aaa; font-size: 0.9em; margin-top: 5px; }}
-    .stat-total .numero {{ color: #ffd200; }}
-    .stat-aprovado .numero {{ color: #00ff88; }}
-    .stat-filtrado .numero {{ color: #ff4444; }}
-    
-    .tabela-container {{
-        overflow-x: auto;
-        background: rgba(0,0,0,0.3);
-        border-radius: 15px;
-        padding: 20px;
-        backdrop-filter: blur(10px);
-    }}
-    table {{
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.9em;
-    }}
-    th {{
-        background: rgba(247, 151, 30, 0.3);
-        padding: 12px 8px;
-        text-align: left;
-        border-bottom: 2px solid #f7971e;
-        color: #ffd200;
-        position: sticky;
-        top: 0;
-    }}
-    td {{
-        padding: 10px 8px;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-        vertical-align: middle;
-    }}
-    tr:hover {{ background: rgba(255,255,255,0.05); }}
-    tr.aprovado {{ background: rgba(0, 255, 136, 0.08); }}
-    tr.filtrado {{ background: rgba(255, 68, 68, 0.05); }}
-    
-    .ca-link {{
-        color: #00d4ff;
-        text-decoration: none;
-        font-family: monospace;
-        font-size: 0.85em;
-    }}
-    .ca-link:hover {{
-        color: #ffd200;
-        text-decoration: underline;
-    }}
-    .status-badge {{
-        padding: 4px 10px;
-        border-radius: 20px;
-        font-size: 0.8em;
-        font-weight: bold;
-        display: inline-block;
-    }}
-    .status-badge.aprovado {{
-        background: rgba(0, 255, 136, 0.2);
-        color: #00ff88;
-    }}
-    .status-badge.filtrado {{
-        background: rgba(255, 68, 68, 0.2);
-        color: #ff4444;
-    }}
-    .motivos {{
-        font-size: 0.8em;
-        color: #ff8888;
-        max-width: 200px;
-    }}
-    .footer {{
-        text-align: center;
-        margin-top: 30px;
-        color: #666;
-        font-size: 0.9em;
-    }}
-    .filtro-info {{
-        background: rgba(255,255,255,0.05);
-        padding: 15px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        font-size: 0.9em;
-    }}
-    .filtro-info b {{ color: #ffd200; }}
-</style>
-</head>
-<body>
-<div class="container">
-    <h1>🦍 PRIMEAPE 7 - RELATÓRIO DE VARREDURA</h1>
-    <p class="subtitulo">Gerado em {datetime.now().strftime('%d/%m/%Y às %H:%M:%S')}</p>
-    
-    <div class="stats">
-        <div class="stat-card stat-total">
-            <div class="numero">{total}</div>
-            <div class="label">Total Analisados</div>
-        </div>
-        <div class="stat-card stat-aprovado">
-            <div class="numero">{aprovados}</div>
-            <div class="label">✅ Aprovados (Gemas)</div>
-        </div>
-        <div class="stat-card stat-filtrado">
-            <div class="numero">{filtrados}</div>
-            <div class="label">❌ Filtrados</div>
-        </div>
-    </div>
-    
-    <div class="filtro-info">
-        <b>Filtros Ativos:</b> MC $2k-$500k | Liq $1k-$100k | Vol 24h ≥ $1k | Pump 24h 5%-200% | Pump 1h ≥ -20% | Vol/MC 0.05-2.0 | Sem tokens nativos | <48h
-    </div>
-    
-    <div class="tabela-container">
-        <table>
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Rede</th>
-                    <th>Token</th>
-                    <th>CA (DexScreener)</th>
-                    <th>Market Cap</th>
-                    <th>Liquidez</th>
-                    <th>Vol 24h</th>
-                    <th>Pump 24h</th>
-                    <th>Pump 1h</th>
-                    <th>Idade</th>
-                    <th>Status</th>
-                    <th>Motivo do Filtro</th>
-                </tr>
-            </thead>
-            <tbody>
-                {linhas_tabela}
-            </tbody>
-        </table>
-    </div>
-    
-    <div class="footer">
-         PrimeApe 7 • Radar de Gemas • {datetime.now().year}
-    </div>
-</div>
-</body>
-</html>"""
-    
-    with open(DEBUG_REPORT_FILE, 'w', encoding='utf-8') as f:
-        f.write(html)
-    print(f" Relatório HTML salvo: {DEBUG_REPORT_FILE}")
 
 def buscar_pares_dexscreener():
     print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
     pares_validos = []
-    todas_analises = []
     
     for rede in REDES:
         try:
@@ -590,15 +325,11 @@ def buscar_pares_dexscreener():
             pares = data.get('pairs', [])
             print(f"  🔍 {rede.upper()}: {len(pares)} pares brutos encontrados")
             
-            for par in pares[:50]:
-                analise = analisar_par(par, rede)
-                todas_analises.append(analise)
+            for par in pares[:150]:
                 if aplicar_filtros(par):
                     pares_validos.append(par)
         except Exception as e:
             print(f"  ⚠️ Erro {rede}: {e}")
-    
-    gerar_relatorio_html(todas_analises)
     
     return pares_validos
 
@@ -610,7 +341,8 @@ def classificar_oportunidade(num_canais):
     else:
         return 3, "🥉 HIDDEN GEM"
 
-def formatar_alerta(par, nivel, canais_mencionados):
+def formatar_alerta_com_botoes(par, nivel, canais_mencionados):
+    """Formata alerta COM botões inline"""
     token = par.get('baseToken', {}).get('symbol', 'Unknown')
     ca = par.get('pairAddress', 'N/A')
     rede = par.get('chainId', 'N/A').upper()
@@ -625,32 +357,49 @@ def formatar_alerta(par, nivel, canais_mencionados):
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "🥇", 2: "🥈", 3: ""}
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
-    dex_link = f"[DexScreener](https://dexscreener.com/{rede.lower()}/{ca})"
-    report_link = f"[📊 Relatório Completo]({GITHUB_REPORT_URL})"
+    dex_link = f"https://dexscreener.com/{rede.lower()}/{ca}"
     
     canais_info = ""
     if canais_mencionados:
         canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
     
-    return (
+    msg = (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
-        f" *{descricoes[nivel]}*\n{canais_info}\n\n"
+        f"📌 *{descricoes[nivel]}*\n{canais_info}\n\n"
         f"🥇 *Token:* #{token} ({token})\n*CA:* `{ca}`\n*Chain:* {rede}\n"
         f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
         f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n\n"
-        f"{dex_link} | {report_link}\n\n⚠️ _DYOR!_"
+        f"⚠️ _DYOR!_"
     )
+    
+    # Cria botões inline
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "🔍 DexScreener", "url": dex_link},
+                {"text": "📋 Copiar CA", "callback_data": f"copy_ca:{ca}"}
+            ],
+            [
+                {"text": " Gráfico", "url": f"https://dexscreener.com/{rede.lower()}/{ca}"},
+                {"text": "🔄 Atualizar", "callback_data": "refresh"}
+            ]
+        ]
+    }
+    
+    return msg, keyboard
 
 async def main():
     print("🦍 PrimeApe 7 Iniciado...")
     
+    # 1. Market Pulse (se for a hora)
     if verificar_pulse_horario():
         enviar_market_pulse()
     
+    # 2. Scan de Oportunidades
     cas_enviados = carregar_cas_enviados()
     print(f"📋 {len(cas_enviados)} CAs na memória")
     
@@ -672,7 +421,10 @@ async def main():
             num_canais, mencoes = await verificar_canais_telegram(ca)
             nivel, _ = classificar_oportunidade(num_canais)
             
-            enviar_alerta_telegram(formatar_alerta(op, nivel, mencoes))
+            # Envia alerta COM botões
+            msg, keyboard = formatar_alerta_com_botoes(op, nivel, mencoes)
+            enviar_alerta_telegram_com_botoes(msg, keyboard)
+            
             novos_cas.append(ca)
             import time
             time.sleep(2)
