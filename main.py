@@ -17,22 +17,44 @@ PAT_TOKEN = os.getenv('PAT_TOKEN')
 REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
 
-# LISTA COMPLETA DE CANAIS ALPHA
+# ==============================================================================
+# LISTA MESTRA DE CANAIS ALPHA (EXPANDIDA GLOBALMENTE)
+# ==============================================================================
 CANAIS_ALPHA = [
+    # --- ORIGINAIS (Base) ---
     'mad_apes_gambles', 'TheDonsCalls', 'TheSolitairePrestige',
     'gubbinscalls', 'mad_apes', 'sadcatgamble',
     'ghastlygems', 'uranusX100', 'ramcalls',
-    'gogetacalls', 'dylansdegens', 'TWOSICCsPICCs',
-    'marcellcooks', 'roobbiee', 'ancientkols',
-    'ThanosGems', 'BullishCallsPremium', 'dr_crypto_channel'
+    
+    # --- NOVOS APROVADOS (Alpha Curado) ---
+    'gogetacalls', 'dylansdegens', 'TWOSICCsPICCs', 'marcellcooks',
+    
+    # --- SOLICITADOS POR VOCÊ (Degen/Gems) ---
+    'Gemsminechat', 'MineGems', 'Degen_Dynasty', 'tigers_callz',
+    
+    # --- RÚSSIA / CIS (Alta Frequência) ---
+    'FRI_Russian_Insiders', 'btctradingclub', 'CRYPTO_insidderr',
+    
+    # --- COREIA / ÁSIA (Early Tech) ---
+    'WeCryptoTogether', 'BSC_SWITZERLAND',
+    
+    # --- INTERNACIONAL / MEMECOIN ALPHA ---
+    'GemHunter', 'ad_crypto', 'Official_GCR', 'OlimpioAlpha',
+    'CryptoInnerCircle', 'BinanceKillers', 'WallStreetQueen',
+    
+    # --- EM OBSERVAÇÃO (Manter por enquanto, avaliar depois) ---
+    'roobbiee', 'ancientkols', 'ThanosGems', 'BullishCallsPremium', 'dr_crypto_channel'
 ]
 
 REDES = ["solana", "ethereum", "bsc", "base"]
 SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
 
-# TOKENS NATIVOS QUE DEVEM SER BLOQUEADOS
-TOKENS_NATIVOS = ['SOL', 'ETH', 'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'USDC', 'USDT', 'DAI', 'WETH', 'WSOL', 'WBNB']
+# TOKENS NATIVOS E STABLECOINS QUE DEVEM SER IGNORADOS
+TOKENS_NATIVOS = [
+    'SOL', 'ETH', 'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'BASE',
+    'USDC', 'USDT', 'DAI', 'WETH', 'WSOL', 'WBNB', 'WBTC'
+]
 
 # --- FUNÇÕES DE MEMÓRIA ---
 def carregar_cas_enviados():
@@ -137,7 +159,7 @@ def enviar_market_pulse():
     
     msg += "📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
-    msg += "• Filters: MC $5k-$500k | Liq $1k-$100k | Pump 5-200%\n"
+    msg += "• Filters: MC $2k-$500k | Vol $1k+ | Pump 5-200%\n"
     msg += "• Next alpha scan in 15 min...\n\n"
     msg += "🔔 _Turn on notifications!_"
     
@@ -175,13 +197,14 @@ async def verificar_canais_telegram(ca_address):
         
         for canal in CANAIS_ALPHA:
             try:
-                async for message in client.iter_messages(canal, limit=50):
+                # Limitado a 30 mensagens para evitar timeout do GitHub Actions e ser mais rápido
+                async for message in client.iter_messages(canal, limit=30):
                     if ca_address.lower() in message.text.lower():
                         if canal not in canais_que_mencionaram:
                             canais_que_mencionaram.append(canal)
                         break
             except Exception as e:
-                print(f"  ⚠️ Erro ao ler {canal}: {e}")
+                # Ignora canais privados sem acesso ou erros de rate limit
                 continue
         
         await client.disconnect()
@@ -202,10 +225,10 @@ def enviar_alerta_telegram(mensagem):
         else:
             print(f"❌ Erro: {resp.text}")
     except Exception as e:
-        print(f" Erro: {e}")
+        print(f"❌ Erro: {e}")
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
     pares_validos = []
     for rede in REDES:
         try:
@@ -213,7 +236,7 @@ def buscar_pares_dexscreener():
             data = requests.get(url, timeout=10).json()
             pares = data.get('pairs', [])
             print(f"  🔍 {rede.upper()}: {len(pares)} pares brutos encontrados")
-            for par in pares[:100]:
+            for par in pares[:150]: # Aumentado para 150 para pegar mais gems
                 if aplicar_filtros(par):
                     pares_validos.append(par)
         except Exception as e:
@@ -238,19 +261,19 @@ def aplicar_filtros(par):
     if symbol in TOKENS_NATIVOS:
         return False
     
-    # ✅ MARKET CAP: Entre $5k e $500k (GEMAS!)
-    if not mc or mc < 5000 or mc > 500000:
+    # ✅ MARKET CAP: Entre $2k e $500k (GEMAS MUITO EARLY!)
+    if not mc or mc < 2000 or mc > 500000:
         return False
     
     # ✅ LIQUIDEZ: Mínimo $1k, máximo $100k
     if not liq or liq < 1000 or liq > 100000:
         return False
     
-    # ✅ VOLUME: Pelo menos $500 nas últimas 24h
-    if vol < 500:
+    # ✅ VOLUME: Pelo menos $1k nas últimas 24h
+    if vol < 1000:
         return False
     
-    # ✅ PUMP 24h: Entre 5% e 200% (movimento real)
+    # ✅ PUMP 24h: Entre 5% e 200% (movimento real, não estourado)
     if pump_24h < 5 or pump_24h > 200:
         return False
     
@@ -258,7 +281,7 @@ def aplicar_filtros(par):
     if pump_1h < -20:
         return False
     
-    # ✅ RAZÃO VOLUME/MC: Entre 0.05 e 2.0 (atividade saudável)
+    # ✅ RAZÃO VOLUME/MC: Entre 0.05 e 2.0 (atividade saudável, sem wash trading absurdo)
     if vol / mc < 0.05 or vol / mc > 2.0:
         return False
     
@@ -300,7 +323,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     
     canais_info = ""
     if canais_mencionados:
-        canais_info = f"\n *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
+        canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
     
     return (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
@@ -328,10 +351,12 @@ async def main():
     novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
     print(f"✨ {len(novas)} oportunidades NOVAS")
     
+    # Ordena por liquidez + volume para priorizar as mais "reais"
     novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
     
     if novas:
         novos_cas = []
+        # Processa no máximo 3 novas oportunidades por rodada para não estourar o tempo do GitHub
         for i, op in enumerate(novas[:3], 1):
             token = op.get('baseToken', {}).get('symbol', 'Unknown')
             ca = op.get('pairAddress', 'N/A')
@@ -343,7 +368,7 @@ async def main():
             enviar_alerta_telegram(formatar_alerta(op, nivel, mencoes))
             novos_cas.append(ca)
             import time
-            time.sleep(2)
+            time.sleep(2) # Pausa para evitar rate limit do Telegram
         
         cas_enviados.extend(novos_cas)
         salvar_cas_enviados(cas_enviados)
