@@ -6,7 +6,6 @@ import base64
 from datetime import datetime
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # --- CONFIGURAÇÕES ---
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -52,7 +51,7 @@ SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
 DEBUG_REPORT_FILE = "debug_report.html"
 
-# URL DO RELATÓRIO NO GITHUB (será atualizada após commit)
+# URL DO RELATÓRIO NO GITHUB
 GITHUB_REPORT_URL = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/blob/main/{DEBUG_REPORT_FILE}"
 
 # TOKENS NATIVOS E STABLECOINS QUE DEVEM SER IGNORADOS
@@ -77,7 +76,7 @@ def salvar_cas_enviados(cas_enviados):
 
 def commitar_no_github():
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
-        print("️ Tokens do GitHub não configurados")
+        print("⚠️ Tokens do GitHub não configurados")
         return
     
     for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE, DEBUG_REPORT_FILE]:
@@ -142,7 +141,7 @@ def get_top_movers():
     return movers[:3]
 
 def enviar_market_pulse():
-    print(" Enviando Market Pulse...")
+    print("📡 Enviando Market Pulse...")
     precos = get_preco_global()
     movers = get_top_movers()
     
@@ -162,20 +161,13 @@ def enviar_market_pulse():
             msg += f"{i}. *{m['symbol']}* ({m['chain']}) +{m['pump']:.0f}% | Liq: ${m['liq']:,.0f}\n"
         msg += "\n"
     
-    msg += " *Radar Status:*\n"
+    msg += "📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
-    msg += "• Filters: MC $2k-$500k | Vol $1k+ | Pump 5-200%\n"
+    msg += "• Filters: MC $2k-$500k | Vol $1k+ | Pump 5-200% | <48h\n"
     msg += "• Next alpha scan in 15 min...\n\n"
-    msg += "🔔 _Turn on notifications!_"
+    msg += " _Turn on notifications!_"
     
-    # Botões para Market Pulse
-    keyboard = [
-        [InlineKeyboardButton(" Ver Relatório Completo", url=GITHUB_REPORT_URL)],
-        [InlineKeyboardButton("🔄 Atualizar", callback_data="refresh_pulse")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    enviar_alerta_telegram_com_botoes(msg, reply_markup)
+    enviar_alerta_telegram(msg)
 
 def verificar_pulse_horario():
     hora_atual = datetime.now().hour
@@ -204,7 +196,7 @@ async def verificar_canais_telegram(ca_address):
         await client.connect()
         
         if not await client.is_user_authorized():
-            print("⚠️ Session inválida")
+            print("️ Session inválida")
             return 0, []
         
         for canal in CANAIS_ALPHA:
@@ -224,7 +216,6 @@ async def verificar_canais_telegram(ca_address):
     return len(canais_que_mencionaram), canais_que_mencionaram
 
 def enviar_alerta_telegram(mensagem):
-    """Envia alerta sem botões (legado)"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -238,27 +229,6 @@ def enviar_alerta_telegram(mensagem):
     except Exception as e:
         print(f"❌ Erro: {e}")
 
-def enviar_alerta_telegram_com_botoes(mensagem, reply_markup):
-    """Envia alerta COM botões inline"""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": TELEGRAM_CHANNEL_ID, 
-        "text": mensagem, 
-        "parse_mode": "Markdown", 
-        "disable_web_page_preview": False,
-        "reply_markup": reply_markup.to_json()
-    }
-    try:
-        resp = requests.post(url, json=data, timeout=10)
-        if resp.status_code == 200:
-            print("✅ Alerta com botões enviado!")
-        else:
-            print(f"❌ Erro: {resp.text}")
-    except Exception as e:
-        print(f" Erro: {e}")
-
 def analisar_par(par, rede):
     """Analisa um par e retorna dict com dados + motivo do filtro"""
     liq = par.get('liquidity', {}).get('usd', 0) or 0
@@ -271,6 +241,14 @@ def analisar_par(par, rede):
     symbol = base_token.get('symbol', 'N/A')
     ca = par.get('pairAddress', 'N/A')
     price = par.get('priceUsd', '0')
+    
+    # Calcular idade do par
+    pair_created_at = par.get('pairCreatedAt', 0)
+    age_hours = 999
+    if pair_created_at:
+        created_timestamp = pair_created_at / 1000
+        now_timestamp = datetime.now().timestamp()
+        age_hours = (now_timestamp - created_timestamp) / 3600
     
     motivos = []
     if symbol.upper() in TOKENS_NATIVOS:
@@ -287,6 +265,8 @@ def analisar_par(par, rede):
         motivos.append(f"Dump 1h {pump_1h:+.1f}%")
     if mc > 0 and vol > 0 and (vol / mc < 0.05 or vol / mc > 2.0):
         motivos.append("Vol/MC desbalanceado")
+    if age_hours > 48:
+        motivos.append(f"Token antigo ({age_hours:.0f}h)")
     
     aprovado = len(motivos) == 0
     
@@ -300,37 +280,71 @@ def analisar_par(par, rede):
         'pump_1h': pump_1h,
         'pump_24h': pump_24h,
         'price': price,
+        'age_hours': age_hours,
         'aprovado': aprovado,
         'motivos': motivos
     }
 
 def aplicar_filtros(par):
     """Filtros RIGOROSOS para encontrar GEMAS REAIS"""
+    
+    # Dados básicos
     liq = par.get('liquidity', {}).get('usd', 0)
     mc = par.get('fdv', 0) or par.get('marketCap', 0)
     vol = par.get('volume', {}).get('h24', 0)
     pump_1h = par.get('priceChange', {}).get('h1', 0)
     pump_24h = par.get('priceChange', {}).get('h24', 0)
     
+    # Token info
     base_token = par.get('baseToken', {})
     symbol = base_token.get('symbol', '').upper()
     
+    # ❌ FILTRAR TOKENS NATIVOS E STABLECOINS
     if symbol in TOKENS_NATIVOS:
         return False
+    
+    # ✅ MARKET CAP: Entre $2k e $500k
     if not mc or mc < 2000 or mc > 500000:
         return False
+    
+    # ✅ LIQUIDEZ: Mínimo $1k, máximo $100k
     if not liq or liq < 1000 or liq > 100000:
         return False
+    
+    # ✅ VOLUME: Pelo menos $1k nas últimas 24h
     if vol < 1000:
         return False
+    
+    # ✅ PUMP 24h: Entre 5% e 200%
     if pump_24h < 5 or pump_24h > 200:
         return False
+    
+    # ✅ PUMP 1h: Não pode estar caindo forte (> -20%)
     if pump_1h < -20:
         return False
+    
+    # ✅ RAZÃO VOLUME/MC: Entre 0.05 e 2.0
     if vol / mc < 0.05 or vol / mc > 2.0:
         return False
+    
+    # ✅ PAR DE NEGOCIAÇÃO: Deve ter endereço válido
     pair_address = par.get('pairAddress', '')
     if not pair_address or len(pair_address) < 10:
+        return False
+    
+    # 🆕 FILTRO DE IDADE: Token criado há menos de 48h
+    pair_created_at = par.get('pairCreatedAt', 0)
+    if pair_created_at:
+        # pairCreatedAt vem em milissegundos
+        created_timestamp = pair_created_at / 1000
+        now_timestamp = datetime.now().timestamp()
+        age_hours = (now_timestamp - created_timestamp) / 3600
+        
+        # Bloqueia tokens com mais de 48h
+        if age_hours > 48:
+            return False
+    else:
+        # Se não tem data de criação, bloqueia por segurança
         return False
     
     return True
@@ -348,14 +362,13 @@ def gerar_relatorio_html(analises):
         motivos_html = "<br>".join(a['motivos']) if a['motivos'] else "-"
         dex_link = f"https://dexscreener.com/{a['rede'].lower()}/{a['ca']}"
         
-        # Formatação de valores
         mc_fmt = f"${a['mc']:,.0f}"
         liq_fmt = f"${a['liq']:,.0f}"
         vol_fmt = f"${a['vol']:,.0f}"
         pump_24h_fmt = f"{a['pump_24h']:+.1f}%"
         pump_1h_fmt = f"{a['pump_1h']:+.1f}%"
+        age_fmt = f"{a['age_hours']:.1f}h"
         
-        # Cor do pump
         cor_pump_24h = "green" if a['pump_24h'] > 0 else "red"
         cor_pump_1h = "green" if a['pump_1h'] > 0 else "red"
         
@@ -370,6 +383,7 @@ def gerar_relatorio_html(analises):
             <td>{vol_fmt}</td>
             <td style="color:{cor_pump_24h}"><b>{pump_24h_fmt}</b></td>
             <td style="color:{cor_pump_1h}"><b>{pump_1h_fmt}</b></td>
+            <td>{age_fmt}</td>
             <td><span class="status-badge {status_class}">{status_text}</span></td>
             <td class="motivos">{motivos_html}</td>
         </tr>
@@ -379,7 +393,7 @@ def gerar_relatorio_html(analises):
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title> PrimeApe 7 - Relatório de Varredura</title>
+<title>🦍 PrimeApe 7 - Relatório de Varredura</title>
 <style>
     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
     body {{
@@ -526,7 +540,7 @@ def gerar_relatorio_html(analises):
     </div>
     
     <div class="filtro-info">
-        <b>Filtros Ativos:</b> MC $2k-$500k | Liq $1k-$100k | Vol 24h ≥ $1k | Pump 24h 5%-200% | Pump 1h ≥ -20% | Vol/MC 0.05-2.0 | Sem tokens nativos
+        <b>Filtros Ativos:</b> MC $2k-$500k | Liq $1k-$100k | Vol 24h ≥ $1k | Pump 24h 5%-200% | Pump 1h ≥ -20% | Vol/MC 0.05-2.0 | Sem tokens nativos | <48h
     </div>
     
     <div class="tabela-container">
@@ -542,6 +556,7 @@ def gerar_relatorio_html(analises):
                     <th>Vol 24h</th>
                     <th>Pump 24h</th>
                     <th>Pump 1h</th>
+                    <th>Idade</th>
                     <th>Status</th>
                     <th>Motivo do Filtro</th>
                 </tr>
@@ -575,7 +590,6 @@ def buscar_pares_dexscreener():
             pares = data.get('pairs', [])
             print(f"  🔍 {rede.upper()}: {len(pares)} pares brutos encontrados")
             
-            # Analisa os primeiros 50 pares de cada rede para o relatório
             for par in pares[:50]:
                 analise = analisar_par(par, rede)
                 todas_analises.append(analise)
@@ -584,22 +598,21 @@ def buscar_pares_dexscreener():
         except Exception as e:
             print(f"  ⚠️ Erro {rede}: {e}")
     
-    # Gera o relatório HTML com todas as análises
     gerar_relatorio_html(todas_analises)
     
     return pares_validos
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, " HIGH CONFIDENCE"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
         return 3, "🥉 HIDDEN GEM"
 
-def formatar_alerta_com_botoes(par, nivel, canais_mencionados, ca):
-    """Formata alerta COM botões inline"""
+def formatar_alerta(par, nivel, canais_mencionados):
     token = par.get('baseToken', {}).get('symbol', 'Unknown')
+    ca = par.get('pairAddress', 'N/A')
     rede = par.get('chainId', 'N/A').upper()
     liq = par.get('liquidity', {}).get('usd', 0)
     pump = par.get('priceChange', {}).get('h1', 0)
@@ -612,45 +625,32 @@ def formatar_alerta_com_botoes(par, nivel, canais_mencionados, ca):
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: ""}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
-    dex_link = f"https://dexscreener.com/{rede.lower()}/{ca}"
+    dex_link = f"[DexScreener](https://dexscreener.com/{rede.lower()}/{ca})"
+    report_link = f"[📊 Relatório Completo]({GITHUB_REPORT_URL})"
     
     canais_info = ""
     if canais_mencionados:
         canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
     
-    msg = (
+    return (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
-        f"📌 *{descricoes[nivel]}*\n{canais_info}\n\n"
+        f" *{descricoes[nivel]}*\n{canais_info}\n\n"
         f"🥇 *Token:* #{token} ({token})\n*CA:* `{ca}`\n*Chain:* {rede}\n"
         f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
         f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n\n"
-        f"[DexScreener]({dex_link})\n\n⚠️ _DYOR!_"
+        f"{dex_link} | {report_link}\n\n⚠️ _DYOR!_"
     )
-    
-    # Cria botões inline
-    keyboard = [
-        [
-            InlineKeyboardButton("🔍 DexScreener", url=dex_link),
-            InlineKeyboardButton("📊 Relatório", url=GITHUB_REPORT_URL)
-        ],
-        [InlineKeyboardButton("📋 Copiar CA", callback_data=f"copy_ca:{ca}")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    return msg, reply_markup
 
 async def main():
     print("🦍 PrimeApe 7 Iniciado...")
     
-    # 1. Market Pulse (se for a hora)
     if verificar_pulse_horario():
         enviar_market_pulse()
     
-    # 2. Scan de Oportunidades
     cas_enviados = carregar_cas_enviados()
     print(f"📋 {len(cas_enviados)} CAs na memória")
     
@@ -672,10 +672,7 @@ async def main():
             num_canais, mencoes = await verificar_canais_telegram(ca)
             nivel, _ = classificar_oportunidade(num_canais)
             
-            # Envia alerta COM botões
-            msg, reply_markup = formatar_alerta_com_botoes(op, nivel, mencoes, ca)
-            enviar_alerta_telegram_com_botoes(msg, reply_markup)
-            
+            enviar_alerta_telegram(formatar_alerta(op, nivel, mencoes))
             novos_cas.append(ca)
             import time
             time.sleep(2)
