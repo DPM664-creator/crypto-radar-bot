@@ -31,6 +31,9 @@ REDES = ["solana", "ethereum", "bsc", "base"]
 SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
 
+# TOKENS NATIVOS QUE DEVEM SER BLOQUEADOS
+TOKENS_NATIVOS = ['SOL', 'ETH', 'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'USDC', 'USDT', 'DAI', 'WETH', 'WSOL', 'WBNB']
+
 # --- FUNÇÕES DE MEMÓRIA ---
 def carregar_cas_enviados():
     if os.path.exists(SENT_CAS_FILE):
@@ -96,9 +99,12 @@ def get_top_movers():
                 liq = p.get('liquidity', {}).get('usd', 0)
                 pump = p.get('priceChange', {}).get('h24', 0)
                 vol = p.get('volume', {}).get('h24', 0)
+                base = p.get('baseToken', {}).get('symbol', '').upper()
+                if base in TOKENS_NATIVOS:
+                    continue
                 if 20 < pump < 100 and liq > 10000 and vol > 50000:
                     movers.append({
-                        'symbol': p.get('baseToken', {}).get('symbol', '?'),
+                        'symbol': base,
                         'chain': p.get('chainId', '?').upper(),
                         'pump': pump, 'liq': liq
                     })
@@ -119,7 +125,7 @@ def enviar_market_pulse():
         msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
-            emoji = "" if change >= 0 else ""
+            emoji = "🟢" if change >= 0 else "🔴"
             msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
         msg += "\n"
     
@@ -131,9 +137,9 @@ def enviar_market_pulse():
     
     msg += "📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
-    msg += "• Filters: MC > $10k, Liq > $5k, Pump < 10%\n"
+    msg += "• Filters: MC $5k-$500k | Liq $1k-$100k | Pump 5-200%\n"
     msg += "• Next alpha scan in 15 min...\n\n"
-    msg += " _Turn on notifications!_"
+    msg += "🔔 _Turn on notifications!_"
     
     enviar_alerta_telegram(msg)
 
@@ -164,7 +170,7 @@ async def verificar_canais_telegram(ca_address):
         await client.connect()
         
         if not await client.is_user_authorized():
-            print(" Session inválida")
+            print("⚠️ Session inválida")
             return 0, []
         
         for canal in CANAIS_ALPHA:
@@ -196,17 +202,17 @@ def enviar_alerta_telegram(mensagem):
         else:
             print(f"❌ Erro: {resp.text}")
     except Exception as e:
-        print(f"❌ Erro: {e}")
+        print(f" Erro: {e}")
 
 def buscar_pares_dexscreener():
-    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
+    print(f" [{datetime.now().strftime('%H:%M:%S')}] Buscando pares...")
     pares_validos = []
     for rede in REDES:
         try:
             url = f"https://api.dexscreener.com/latest/dex/search?q={rede}"
             data = requests.get(url, timeout=10).json()
             pares = data.get('pairs', [])
-            print(f"   {rede.upper()}: {len(pares)} pares brutos encontrados")
+            print(f"  🔍 {rede.upper()}: {len(pares)} pares brutos encontrados")
             for par in pares[:100]:
                 if aplicar_filtros(par):
                     pares_validos.append(par)
@@ -215,21 +221,52 @@ def buscar_pares_dexscreener():
     return pares_validos
 
 def aplicar_filtros(par):
+    """Filtros RIGOROSOS para encontrar GEMAS REAIS"""
+    
+    # Dados básicos
     liq = par.get('liquidity', {}).get('usd', 0)
     mc = par.get('fdv', 0) or par.get('marketCap', 0)
     vol = par.get('volume', {}).get('h24', 0)
-    pump = par.get('priceChange', {}).get('h1', 0)
+    pump_1h = par.get('priceChange', {}).get('h1', 0)
+    pump_24h = par.get('priceChange', {}).get('h24', 0)
     
-    if not liq or liq < 5000:
+    # Token info
+    base_token = par.get('baseToken', {})
+    symbol = base_token.get('symbol', '').upper()
+    
+    # ❌ FILTRAR TOKENS NATIVOS E STABLECOINS
+    if symbol in TOKENS_NATIVOS:
         return False
-    if not mc or mc < 10000:
+    
+    # ✅ MARKET CAP: Entre $5k e $500k (GEMAS!)
+    if not mc or mc < 5000 or mc > 500000:
         return False
-    if vol > 0 and mc > 0 and (vol / mc) > 0.10:
+    
+    # ✅ LIQUIDEZ: Mínimo $1k, máximo $100k
+    if not liq or liq < 1000 or liq > 100000:
         return False
-    if pump > 10.0:
+    
+    # ✅ VOLUME: Pelo menos $500 nas últimas 24h
+    if vol < 500:
         return False
-    if vol < 1000:
+    
+    # ✅ PUMP 24h: Entre 5% e 200% (movimento real)
+    if pump_24h < 5 or pump_24h > 200:
         return False
+    
+    # ✅ PUMP 1h: Não pode estar caindo forte (> -20%)
+    if pump_1h < -20:
+        return False
+    
+    # ✅ RAZÃO VOLUME/MC: Entre 0.05 e 2.0 (atividade saudável)
+    if vol / mc < 0.05 or vol / mc > 2.0:
+        return False
+    
+    # ✅ PAR DE NEGOCIAÇÃO: Deve ter endereço válido
+    pair_address = par.get('pairAddress', '')
+    if not pair_address or len(pair_address) < 10:
+        return False
+    
     return True
 
 def classificar_oportunidade(num_canais):
@@ -263,7 +300,7 @@ def formatar_alerta(par, nivel, canais_mencionados):
     
     canais_info = ""
     if canais_mencionados:
-        canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
+        canais_info = f"\n *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}"
     
     return (
         f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
@@ -312,7 +349,7 @@ async def main():
         salvar_cas_enviados(cas_enviados)
         print(f"\n💾 {len(novos_cas)} novos CAs salvos")
     else:
-        print("\n Nenhuma oportunidade nova")
+        print("\n🔄 Nenhuma oportunidade nova")
         
     commitar_no_github()
     print("\n✅ Fim.")
