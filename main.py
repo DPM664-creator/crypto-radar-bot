@@ -42,9 +42,6 @@ TOKENS_NATIVOS = [
     'USDC', 'USDT', 'DAI', 'WETH', 'WSOL', 'WBNB', 'WBTC'
 ]
 
-# Lista global para armazenar tokens verificados (não alertados)
-TOKENS_VERIFICADOS = []
-
 # --- FUNÇÕES DE MEMÓRIA ---
 def carregar_cas_enviados():
     if os.path.exists(SENT_CAS_FILE):
@@ -240,12 +237,14 @@ def aplicar_filtros(par):
 def buscar_pares_dexscreener():
     print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
     pares_validos = []
+    total_brutos = 0
     
     for rede in REDES:
         try:
             url = f"https://api.dexscreener.com/latest/dex/search?q={rede}"
             data = requests.get(url, timeout=10).json()
             pares = data.get('pairs', [])
+            total_brutos += len(pares)
             print(f"  🔍 {rede.upper()}: {len(pares)} raw pairs found")
             
             for par in pares[:50]:
@@ -254,7 +253,7 @@ def buscar_pares_dexscreener():
         except Exception as e:
             print(f"  ⚠️ Error {rede}: {e}")
     
-    return pares_validos
+    return pares_validos, total_brutos
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
@@ -318,53 +317,26 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
     
     return msg, reply_markup
 
-def formatar_analyses_token(token_data, motivo_filtro):
-    """Formata um token para o relatório de análises"""
-    symbol = token_data.get('symbol', 'Unknown')
-    chain = token_data.get('chain', 'Unknown')
-    ca = token_data.get('ca', 'N/A')
-    
-    gmgn_link = get_gmgn_link(ca, chain)
-    dex_link = get_dexscreener_link(ca, chain)
-    
+async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
+    """Envia mensagem de status no canal"""
     msg = (
-        f"🪙 **@{symbol}** - {chain.upper()}\n"
-        f"`{ca}`\n"
-        f"[🔍 GMGN]({gmgn_link}) | [📈 DexScreener]({dex_link})\n"
-        f"⚠️ _{motivo_filtro}_"
+        " *PRIMEAPE 7 - SCAN STATUS*\n\n"
+        f"⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+        f"📊 *Statistics:*\n"
+        f"• Total pairs scanned: `{total_brutos}`\n"
+        f"• Passed filters: `{total_filtrados}`\n"
+        f"• New alerts sent: `{total_alertados}`\n"
+        f"• CAs in memory: `{total_memoria}`\n\n"
+        f"🌐 *Networks:* SOL | ETH | BSC | BASE\n"
+        f"🔍 _Next scan in 15 minutes..._"
     )
     
-    return msg
-
-async def enviar_analyses_completo():
-    """Envia o relatório completo de tokens verificados (não alertados)"""
-    global TOKENS_VERIFICADOS
-    
-    if not TOKENS_VERIFICADOS:
-        msg = "📊 **ANALYSES REPORT**\n\n_No tokens verified yet._"
-        enviar_alerta_telegram(msg, parse_mode="Markdown")
-        return
-    
-    msg = "📊 **PRIMEAPE 7 - VERIFIED TOKENS**\n\n"
-    msg += f"_Total: {len(TOKENS_VERIFICADOS)} tokens_\n\n"
-    msg += "=" * 40 + "\n\n"
-    
-    for i, token in enumerate(TOKENS_VERIFICADOS[-10:], 1):  # Últimos 10 tokens
-        motivo = token.get('filter_reason', 'Filtered by criteria')
-        msg += f"**{i}.** {formatar_analyses_token(token, motivo)}\n\n"
-    
-    msg += "=" * 40
-    msg += "\n\n_Updated: " + datetime.now().strftime('%H:%M:%S UTC') + "_"
-    
-    # Botão para atualizar
-    keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh_analyses")]]
+    keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    enviar_alerta_telegram(msg, reply_markup, parse_mode="Markdown")
+    enviar_alerta_telegram(msg, reply_markup)
 
 async def main():
-    global TOKENS_VERIFICADOS
-    
     print("🦍 PrimeApe 7 Started...")
     
     if verificar_pulse_horario():
@@ -373,13 +345,15 @@ async def main():
     cas_enviados = carregar_cas_enviados()
     print(f"📋 {len(cas_enviados)} CAs in memory")
     
-    oportunidades = buscar_pares_dexscreener()
-    print(f"🎯 {len(oportunidades)} opportunities passed filters!")
+    oportunidades, total_brutos = buscar_pares_dexscreener()
+    print(f" {len(oportunidades)} opportunities passed filters!")
     
     novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
     print(f"✨ {len(novas)} NEW opportunities")
     
     novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
+    
+    total_alertados = 0
     
     if novas:
         novos_cas = []
@@ -397,6 +371,7 @@ async def main():
             msg, reply_markup = formatar_alerta(op, nivel, mencoes, ca, token, chain)
             enviar_alerta_telegram(msg, reply_markup)
             
+            total_alertados += 1
             novos_cas.append(ca)
             import time
             time.sleep(2)
@@ -407,8 +382,8 @@ async def main():
     else:
         print("\n🔄 No new opportunities to alert")
     
-    # Verifica tokens que passaram filtros básicos mas não foram alertados
-    # (aqui você pode adicionar lógica adicional se necessário)
+    # Envia status SEMPRE (mesmo se não tiver novos tokens)
+    await enviar_status_scan(total_brutos, len(oportunidades), total_alertados, len(cas_enviados))
     
     commitar_no_github()
     print("\n✅ Done.")
