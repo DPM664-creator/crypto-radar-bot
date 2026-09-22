@@ -1,0 +1,39 @@
+name: Extrair Canais Telegram
+
+on:
+  workflow_dispatch:  # Só roda quando você clicar manualmente
+
+jobs:
+  extrair:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+    
+    - name: Run extraction script
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        TELEGRAM_SESSION_STRING: ${{ secrets.TELEGRAM_SESSION_STRING }}
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        REPO_OWNER: ${{ secrets.REPO_OWNER }}
+        REPO_NAME: ${{ secrets.REPO_NAME }}
+      run: python extrair_canais.py
+    
+    - name: Commit channels list
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add channels_list.json
+        git commit -m "📋 Lista de canais extraída automaticamente" || echo "Nada para commitar"
+        git push
