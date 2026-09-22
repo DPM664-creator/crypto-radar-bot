@@ -17,25 +17,14 @@ PAT_TOKEN = os.getenv('PAT_TOKEN')
 REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
 
-# ==============================================================================
-# LISTA MESTRA DE CANAIS ALPHA
-# ==============================================================================
-CANAIS_ALPHA = [
-    'mad_apes_gambles', 'TheDonsCalls', 'TheSolitairePrestige',
-    'gubbinscalls', 'mad_apes', 'sadcatgamble',
-    'ghastlygems', 'uranusX100', 'ramcalls',
-    'gogetacalls', 'dylansdegens', 'TWOSICCsPICCs', 'marcellcooks',
-    'Gemsminechat', 'MineGems', 'Degen_Dynasty', 'tigers_callz',
-    'FRI_Russian_Insiders', 'btctradingclub', 'CRYPTO_insidderr',
-    'WeCryptoTogether', 'BSC_SWITZERLAND',
-    'GemHunter', 'ad_crypto', 'Official_GCR', 'OlimpioAlpha',
-    'CryptoInnerCircle', 'BinanceKillers', 'WallStreetQueen',
-    'roobbiee', 'ancientkols', 'ThanosGems', 'BullishCallsPremium', 'dr_crypto_channel'
-]
+# Lista será carregada automaticamente do arquivo
+CANAIS_ALPHA = []
 
 REDES = ["solana", "ethereum", "bsc", "base"]
 SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
+MARKET_PULSE_FILE = "last_market_pulse.txt"
+CHANNELS_FILE = "channels_list.json"
 
 TOKENS_NATIVOS = [
     'SOL', 'ETH', 'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'BASE',
@@ -56,11 +45,31 @@ def salvar_cas_enviados(cas_enviados):
     with open(SENT_CAS_FILE, 'w') as f:
         json.dump({'cas_enviados': cas_enviados}, f, indent=2)
 
+def carregar_canais():
+    """Carrega lista de canais do arquivo channels_list.json"""
+    global CANAIS_ALPHA
+    
+    if os.path.exists(CHANNELS_FILE):
+        try:
+            with open(CHANNELS_FILE, 'r', encoding='utf-8') as f:
+                canais = json.load(f)
+            
+            # Extrai apenas os identificadores (username ou título)
+            CANAIS_ALPHA = [c['identificador'] for c in canais]
+            print(f"📋 {len(CANAIS_ALPHA)} canais carregados do arquivo")
+            return CANAIS_ALPHA
+        except Exception as e:
+            print(f"⚠️ Erro ao carregar canais: {e}")
+            return []
+    else:
+        print("⚠️ Arquivo channels_list.json não encontrado")
+        return []
+
 def commitar_no_github():
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
         return
     
-    for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE]:
+    for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE, MARKET_PULSE_FILE]:
         if not os.path.exists(arquivo):
             continue
         try:
@@ -84,7 +93,7 @@ def commitar_no_github():
         except:
             pass
 
-# --- MARKET PULSE ---
+# --- MARKET PULSE (a cada 3h) ---
 def get_preco_global():
     try:
         url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin&vs_currencies=usd&include_24hr_change=true"
@@ -97,7 +106,7 @@ def get_preco_global():
         return None
 
 def enviar_market_pulse():
-    print("📡 Sending Market Pulse...")
+    print(" Sending Market Pulse...")
     precos = get_preco_global()
     
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
@@ -106,19 +115,41 @@ def enviar_market_pulse():
         msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
-            emoji = "🟢" if change >= 0 else "🔴"
+            emoji = "" if change >= 0 else "🔴"
             msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
     
     msg += "\n📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
-    msg += "• Filters: MC $500-$5M | Liq $500-$500k | <7 days\n"
+    msg += "• Filters: MC $500-$2M | Liq $500-$200k | Vol $5k+ | <14 days\n"
+    msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "\n🔔 _Turn on notifications!_"
     
     enviar_alerta_telegram(msg)
+    
+    with open(MARKET_PULSE_FILE, 'w') as f:
+        f.write(str(datetime.now().hour))
+
+def verificar_market_pulse():
+    hora_atual = datetime.now().hour
+    
+    if not os.path.exists(MARKET_PULSE_FILE):
+        return True
+    
+    try:
+        ultima_hora = int(open(MARKET_PULSE_FILE).read())
+        diferenca = (hora_atual - ultima_hora) % 24
+        
+        if diferenca >= 3:
+            return True
+    except:
+        return True
+    
+    return False
 
 def verificar_pulse_horario():
     hora_atual = datetime.now().hour
     hora_salva = -1
+    
     if os.path.exists(PULSE_CONTROL_FILE):
         try:
             hora_salva = int(open(PULSE_CONTROL_FILE).read())
@@ -134,6 +165,7 @@ def verificar_pulse_horario():
 # --- FUNÇÕES PRINCIPAIS ---
 async def verificar_canais_telegram(ca_address):
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING]):
+        print("️ Session string not configured")
         return 0, []
     
     canais_que_mencionaram = []
@@ -142,21 +174,28 @@ async def verificar_canais_telegram(ca_address):
         await client.connect()
         
         if not await client.is_user_authorized():
+            print("⚠️ Session invalid")
             return 0, []
+        
+        print(f"🔍 Scanning {len(CANAIS_ALPHA)} channels...")
         
         for canal in CANAIS_ALPHA:
             try:
-                async for message in client.iter_messages(canal, limit=30):
+                entity = await client.get_entity(canal)
+                
+                async for message in client.iter_messages(entity, limit=50):
                     if ca_address.lower() in message.text.lower():
-                        if canal not in canais_que_mencionaram:
-                            canais_que_mencionaram.append(canal)
+                        canal_nome = entity.username if entity.username else entity.title
+                        if canal_nome not in canais_que_mencionaram:
+                            canais_que_mencionaram.append(canal_nome)
                         break
-            except:
+                        
+            except Exception as e:
                 continue
         
         await client.disconnect()
-    except:
-        pass
+    except Exception as e:
+        print(f"❌ Telegram connection error: {e}")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -201,22 +240,22 @@ def aplicar_filtros(par):
     if symbol in TOKENS_NATIVOS:
         return False
     
-    if not mc or mc < 500 or mc > 5000000:
+    if not mc or mc < 500 or mc > 2000000:
         return False
     
-    if not liq or liq < 500 or liq > 500000:
+    if not liq or liq < 500 or liq > 200000:
         return False
     
-    if vol < 100:
+    if vol < 5000:
         return False
     
-    if pump_24h < 0 or pump_24h > 500:
+    if pump_24h < 0 or pump_24h > 300:
         return False
     
     if pump_1h < -50:
         return False
     
-    if vol / mc < 0.01 or vol / mc > 5.0:
+    if vol / mc < 0.05 or vol / mc > 3.0:
         return False
     
     pair_address = par.get('pairAddress', '')
@@ -229,13 +268,13 @@ def aplicar_filtros(par):
         now_timestamp = datetime.now().timestamp()
         age_days = (now_timestamp - created_timestamp) / 86400
         
-        if age_days > 7:
+        if age_days > 14:
             return False
     
     return True
 
 def buscar_pares_dexscreener():
-    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
+    print(f" [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
     pares_validos = []
     total_brutos = 0
     
@@ -257,9 +296,9 @@ def buscar_pares_dexscreener():
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, "🥇 HIGH CONFIDENCE"
+        return 1, " HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, "🥈 OPPORTUNITY"
+        return 2, " OPPORTUNITY"
     else:
         return 3, "🥉 HIDDEN GEM"
 
@@ -303,7 +342,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
         f"*Vol 24h:* ${vol:,.2f}\n"
         f"*Pump 1h:* {pump}%\n"
         f"*Pump 24h:* {pump_24h}%\n\n"
-        f"⚠️ _DYOR!_"
+        f"️ _DYOR!_"
     )
     
     keyboard = [
@@ -318,35 +357,44 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
     return msg, reply_markup
 
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
-    """Envia mensagem de status no canal"""
-    msg = (
-        " *PRIMEAPE 7 - SCAN STATUS*\n\n"
-        f"⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
-        f"📊 *Statistics:*\n"
-        f"• Total pairs scanned: `{total_brutos}`\n"
-        f"• Passed filters: `{total_filtrados}`\n"
-        f"• New alerts sent: `{total_alertados}`\n"
-        f"• CAs in memory: `{total_memoria}`\n\n"
-        f"🌐 *Networks:* SOL | ETH | BSC | BASE\n"
-        f"🔍 _Next scan in 15 minutes..._"
-    )
-    
-    keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    enviar_alerta_telegram(msg, reply_markup)
+    if total_alertados > 0:
+        msg = (
+            " *PRIMEAPE 7 - SCAN STATUS*\n\n"
+            f"⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+            f"📊 *Statistics:*\n"
+            f"• Total pairs scanned: `{total_brutos}`\n"
+            f"• Passed filters: `{total_filtrados}`\n"
+            f"• 🚨 **New alerts sent: `{total_alertados}`**\n"
+            f"• CAs in memory: `{total_memoria}`\n\n"
+            f"🌐 *Networks:* SOL | ETH | BSC | BASE\n"
+            f" *Channels:* {len(CANAIS_ALPHA)}\n"
+        )
+        
+        keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        enviar_alerta_telegram(msg, reply_markup)
 
 async def main():
+    global CANAIS_ALPHA
+    
     print("🦍 PrimeApe 7 Started...")
     
-    if verificar_pulse_horario():
+    # Carrega os canais automaticamente
+    if not CANAIS_ALPHA:
+        carregar_canais()
+    
+    print(f"📡 Monitoring {len(CANAIS_ALPHA)} channels")
+    
+    # Market Pulse a cada 3h
+    if verificar_market_pulse():
         enviar_market_pulse()
     
     cas_enviados = carregar_cas_enviados()
     print(f"📋 {len(cas_enviados)} CAs in memory")
     
     oportunidades, total_brutos = buscar_pares_dexscreener()
-    print(f" {len(oportunidades)} opportunities passed filters!")
+    print(f"🎯 {len(oportunidades)} opportunities passed filters!")
     
     novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
     print(f"✨ {len(novas)} NEW opportunities")
@@ -367,7 +415,6 @@ async def main():
             num_canais, mencoes = await verificar_canais_telegram(ca)
             nivel, _ = classificar_oportunidade(num_canais)
             
-            # Envia alerta COM BOTÕES
             msg, reply_markup = formatar_alerta(op, nivel, mencoes, ca, token, chain)
             enviar_alerta_telegram(msg, reply_markup)
             
@@ -378,12 +425,11 @@ async def main():
         
         cas_enviados.extend(novos_cas)
         salvar_cas_enviados(cas_enviados)
-        print(f"\n💾 {len(novos_cas)} new CAs saved")
+        print(f"\n {len(novos_cas)} new CAs saved")
+        
+        await enviar_status_scan(total_brutos, len(oportunidades), total_alertados, len(cas_enviados))
     else:
-        print("\n🔄 No new opportunities to alert")
-    
-    # Envia status SEMPRE (mesmo se não tiver novos tokens)
-    await enviar_status_scan(total_brutos, len(oportunidades), total_alertados, len(cas_enviados))
+        print("\n🔄 No new opportunities - scanning continues...")
     
     commitar_no_github()
     print("\n✅ Done.")
