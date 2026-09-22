@@ -25,6 +25,7 @@ SENT_CAS_FILE = "sent_cas.json"
 PULSE_CONTROL_FILE = "last_pulse_hour.txt"
 MARKET_PULSE_FILE = "last_market_pulse.txt"
 CHANNELS_FILE = "channels_list.json"
+TELEGRAPH_FILE = "telegraph_config.json"
 
 # Tokens que NÃO queremos (consolidados + nativos + stablecoins)
 # BLOQUEIO TOTAL - só aparecem GEMAS puras
@@ -36,7 +37,7 @@ TOKENS_BLOQUEADOS = [
     
     # Stablecoins
     'USDT', 'USDC', 'DAI', 'BUSD', 'USDP', 'TUSD', 'USDD', 'FRAX',
-    'PYUSD', 'GUSD', 'FDUSD', 'TUSD', 'LUSD', 'SUSD',
+    'PYUSD', 'GUSD', 'FDUSD', 'LUSD', 'SUSD',
     
     # Wrapped tokens
     'WETH', 'WSOL', 'WBNB', 'WMATIC', 'WAVAX', 'WFTM', 'WARB', 'WOP',
@@ -45,15 +46,12 @@ TOKENS_BLOQUEADOS = [
     # Tokens consolidados / Blue chips
     'BTC', 'LINK', 'UNI', 'AAVE', 'SUSHI', 'CRV', 'COMP', 'MKR', 'SNX',
     'DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'BOME',
-    'JUP', 'RAY', 'ORCA', 'MNGO', 'SRM', 'FTT',
+    'MNGO', 'SRM', 'FTT',
     
-    # Tokens de infraestrutura conhecidos
-    'USDC', 'USDT', 'DAI', 'FRAX', 'LUSD',
-    'AAVE', 'COMP', 'MKR', 'SNX', 'YFI', 'SUSHI', 'CRV', 'BAL',
-    'LDO', 'RPL', 'CBETH', 'STETH', 'RETH',
+    # DeFi consolidado
+    'YFI', 'BAL', 'LDO', 'RPL', 'CBETH', 'STETH', 'RETH',
     
     # Memecoins famosas (já consolidadas)
-    'DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'BOME',
     'MYRO', 'POPCAT', 'MOG', 'TURBO', 'MILADY',
     
     # Tokens de rede específicos
@@ -83,22 +81,169 @@ def carregar_canais():
             with open(CHANNELS_FILE, 'r', encoding='utf-8') as f:
                 canais = json.load(f)
             
-            # Extrai apenas os identificadores (username ou título)
             CANAIS_ALPHA = [c['identificador'] for c in canais]
             print(f"📋 {len(CANAIS_ALPHA)} canais carregados do arquivo")
             return CANAIS_ALPHA
         except Exception as e:
-            print(f"️ Erro ao carregar canais: {e}")
+            print(f"⚠️ Erro ao carregar canais: {e}")
             return []
     else:
         print("⚠️ Arquivo channels_list.json não encontrado")
         return []
 
+def carregar_telegraph_config():
+    """Carrega configuração do Telegraph (access_token e path da página)"""
+    if os.path.exists(TELEGRAPH_FILE):
+        try:
+            with open(TELEGRAPH_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return None
+    return None
+
+def salvar_telegraph_config(config):
+    """Salva configuração do Telegraph"""
+    with open(TELEGRAPH_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+def criar_ou_atualizar_telegraph(tokens_list):
+    """Cria ou atualiza a página no Telegra.ph com a lista de tokens"""
+    config = carregar_telegraph_config()
+    
+    # Conteúdo HTML da página
+    content_html = []
+    content_html.append({"tag": "p", "children": [f"🦍 PrimeApe 7 Radar - Last scan: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"]})
+    content_html.append({"tag": "p", "children": [f"📊 Total gems found: {len(tokens_list)}"]})
+    content_html.append({"tag": "hr"})
+    
+    for i, token in enumerate(tokens_list, 1):
+        symbol = token.get('symbol', 'Unknown')
+        chain = token.get('chain', 'Unknown').upper()
+        ca = token.get('ca', 'N/A')
+        mc = token.get('mc', 0)
+        liq = token.get('liq', 0)
+        vol = token.get('vol', 0)
+        pump = token.get('pump_24h', 0)
+        channels = token.get('channels', [])
+        
+        rede_map = {'solana': 'sol', 'ethereum': 'eth', 'bsc': 'bsc', 'base': 'base'}
+        rede_short = rede_map.get(chain.lower(), 'sol')
+        gmgn_link = f"https://gmgn.ai/{rede_short}/token/{ca}"
+        dex_link = f"https://dexscreener.com/{chain.lower()}/{ca}"
+        
+        # Título do token
+        content_html.append({"tag": "h3", "children": [f"{i}. @{symbol} - {chain}"]})
+        
+        # CA
+        content_html.append({"tag": "p", "children": [f"CA: {ca}"]})
+        
+        # Stats
+        content_html.append({"tag": "p", "children": [
+            f"MC: ${mc:,.0f} | Liq: ${liq:,.0f} | Vol: ${vol:,.0f} | 24h: {pump:+.1f}%"
+        ]})
+        
+        # Links
+        content_html.append({"tag": "p", "children": [
+            "Links: ",
+            {"tag": "a", "attrs": {"href": gmgn_link}, "children": ["GMGN"]},
+            " | ",
+            {"tag": "a", "attrs": {"href": dex_link}, "children": ["DexScreener"]}
+        ]})
+        
+        # Canais que mencionaram
+        if channels:
+            canais_str = ", ".join([f"@{c}" for c in channels])
+            content_html.append({"tag": "p", "children": [f"📢 Mentioned in: {canais_str}"]})
+        
+        content_html.append({"tag": "hr"})
+    
+    # Rodapé
+    content_html.append({"tag": "p", "children": ["_Powered by PrimeApe 7 _"]})
+    
+    title = f"PrimeApe 7 - Verified Tokens ({datetime.now().strftime('%d/%m %H:%M')})"
+    
+    if config and config.get('access_token') and config.get('path'):
+        # Atualizar página existente
+        try:
+            url = "https://api.telegra.ph/editPage"
+            data = {
+                'access_token': config['access_token'],
+                'path': config['path'],
+                'title': title,
+                'content': json.dumps(content_html),
+                'return_content': 'false'
+            }
+            resp = requests.post(url, data=data, timeout=10)
+            result = resp.json()
+            
+            if result.get('ok'):
+                page_url = f"https://telegra.ph{config['path']}"
+                print(f"✅ Telegraph page updated: {page_url}")
+                return page_url
+            else:
+                print(f"⚠️ Error updating page: {result.get('error')}")
+                # Tenta criar nova
+                return criar_nova_telegraph(title, content_html)
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            return criar_nova_telegraph(title, content_html)
+    else:
+        # Criar nova página
+        return criar_nova_telegraph(title, content_html)
+
+def criar_nova_telegraph(title, content_html):
+    """Cria nova página no Telegra.ph"""
+    try:
+        # Primeiro, criar conta (se não tiver)
+        config = carregar_telegraph_config() or {}
+        
+        if not config.get('access_token'):
+            url = "https://api.telegra.ph/createAccount"
+            data = {
+                'short_name': 'PrimeApe7Bot',
+                'author_name': 'PrimeApe 7',
+                'author_url': 'https://t.me/PrimeApe7Bot'
+            }
+            resp = requests.post(url, data=data, timeout=10)
+            result = resp.json()
+            
+            if result.get('ok'):
+                config['access_token'] = result['result']['access_token']
+                print("✅ Telegraph account created")
+            else:
+                print(f"❌ Error creating account: {result.get('error')}")
+                return None
+        
+        # Criar página
+        url = "https://api.telegra.ph/createPage"
+        data = {
+            'access_token': config['access_token'],
+            'title': title,
+            'content': json.dumps(content_html),
+            'return_content': 'false'
+        }
+        resp = requests.post(url, data=data, timeout=10)
+        result = resp.json()
+        
+        if result.get('ok'):
+            path = result['result']['path']
+            config['path'] = path
+            salvar_telegraph_config(config)
+            page_url = f"https://telegra.ph{path}"
+            print(f"✅ Telegraph page created: {page_url}")
+            return page_url
+        else:
+            print(f"❌ Error creating page: {result.get('error')}")
+            return None
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        return None
+
 def commitar_no_github():
     if not all([PAT_TOKEN, REPO_OWNER, REPO_NAME]):
         return
     
-    for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE, MARKET_PULSE_FILE]:
+    for arquivo in [SENT_CAS_FILE, PULSE_CONTROL_FILE, MARKET_PULSE_FILE, TELEGRAPH_FILE]:
         if not os.path.exists(arquivo):
             continue
         try:
@@ -141,18 +286,18 @@ def enviar_market_pulse():
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     
     if precos:
-        msg += "📊 *Global Market:*\n"
+        msg += " *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
             emoji = "🟢" if change >= 0 else "🔴"
             msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
     
-    msg += "\n📡 *Radar Status:*\n"
+    msg += "\n *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += "• Filters: MC $500-$2M | Liq $500-$200k | Vol $5k+ | <14 days\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
-    msg += "\n _Turn on notifications!_"
+    msg += "\n🔔 _Turn on notifications!_"
     
     enviar_alerta_telegram(msg)
     
@@ -204,7 +349,7 @@ async def verificar_canais_telegram(ca_address):
         await client.connect()
         
         if not await client.is_user_authorized():
-            print("️ Session invalid")
+            print("⚠️ Session invalid")
             return 0, []
         
         print(f"🔍 Scanning {len(CANAIS_ALPHA)} channels...")
@@ -225,7 +370,7 @@ async def verificar_canais_telegram(ca_address):
         
         await client.disconnect()
     except Exception as e:
-        print(f"❌ Telegram connection error: {e}")
+        print(f" Telegram connection error: {e}")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -247,7 +392,7 @@ def enviar_alerta_telegram(mensagem, reply_markup=None, parse_mode="Markdown"):
         if resp.status_code == 200:
             print("✅ Alert sent!")
     except Exception as e:
-        print(f" Error: {e}")
+        print(f"❌ Error: {e}")
 
 def get_gmgn_link(ca, rede):
     rede_map = {'solana': 'sol', 'ethereum': 'eth', 'bsc': 'bsc', 'base': 'base'}
@@ -302,7 +447,7 @@ def aplicar_filtros(par):
     if not pair_address or len(pair_address) < 10:
         return False
     
-    # ⚠️ FILTRO DE IDADE: < 14 DIAS
+    # ️ FILTRO DE IDADE: < 14 DIAS
     pair_created_at = par.get('pairCreatedAt', 0)
     if pair_created_at:
         created_timestamp = pair_created_at / 1000
@@ -343,7 +488,7 @@ def classificar_oportunidade(num_canais):
     else:
         return 3, "🥉 HIDDEN GEM"
 
-def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
+def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, analyses_url):
     liq = par.get('liquidity', {}).get('usd', 0)
     pump = par.get('priceChange', {}).get('h1', 0)
     vol = par.get('volume', {}).get('h24', 0)
@@ -356,7 +501,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
         1: "Multiple alpha channels talking!", 
@@ -383,15 +528,15 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
         f"*Vol 24h:* ${vol:,.2f}\n"
         f"*Pump 1h:* {pump}%\n"
         f"*Pump 24h:* {pump_24h}%\n\n"
-        f"⚠️ _DYOR!_"
+        f"️ _DYOR!_"
     )
     
     keyboard = [
         [
-            InlineKeyboardButton(" DexScreener", url=dex_link),
+            InlineKeyboardButton("🔍 DexScreener", url=dex_link),
             InlineKeyboardButton("🔄 Update", callback_data="refresh")
         ],
-        [InlineKeyboardButton("📊 Analyses", callback_data="show_analyses")]
+        [InlineKeyboardButton("📊 Analyses", url=analyses_url)]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -442,6 +587,9 @@ async def main():
     
     novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
     
+    # Prepara lista para o Telegraph
+    tokens_para_telegraph = []
+    
     total_alertados = 0
     
     if novas:
@@ -456,7 +604,24 @@ async def main():
             num_canais, mencoes = await verificar_canais_telegram(ca)
             nivel, _ = classificar_oportunidade(num_canais)
             
-            msg, reply_markup = formatar_alerta(op, nivel, mencoes, ca, token, chain)
+            # Adiciona na lista do Telegraph
+            tokens_para_telegraph.append({
+                'symbol': token,
+                'chain': chain,
+                'ca': ca,
+                'mc': op.get('fdv', 0) or op.get('marketCap', 0) or 0,
+                'liq': op.get('liquidity', {}).get('usd', 0) or 0,
+                'vol': op.get('volume', {}).get('h24', 0) or 0,
+                'pump_24h': op.get('priceChange', {}).get('h24', 0) or 0,
+                'channels': mencoes
+            })
+            
+            # Cria/atualiza página do Telegraph ANTES de enviar o alerta
+            analyses_url = criar_ou_atualizar_telegraph(tokens_para_telegraph)
+            if not analyses_url:
+                analyses_url = "https://telegra.ph"  # Fallback
+            
+            msg, reply_markup = formatar_alerta(op, nivel, mencoes, ca, token, chain, analyses_url)
             enviar_alerta_telegram(msg, reply_markup)
             
             total_alertados += 1
