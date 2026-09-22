@@ -86,7 +86,7 @@ def criar_ou_atualizar_telegraph(tokens_list):
     config = carregar_telegraph_config()
     content_html = []
     content_html.append({"tag": "p", "children": [f" PrimeApe 7 Radar - Last scan: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"]})
-    content_html.append({"tag": "p", "children": [f" Total gems found: {len(tokens_list)}"]})
+    content_html.append({"tag": "p", "children": [f"📊 Total gems found: {len(tokens_list)}"]})
     content_html.append({"tag": "hr"})
     
     for i, token in enumerate(tokens_list, 1):
@@ -164,7 +164,7 @@ def criar_nova_telegraph(title, content_html):
         else:
             return None
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f" Error: {e}")
         return None
 
 def commitar_no_github():
@@ -209,11 +209,11 @@ def enviar_market_pulse():
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
             msg += f"*{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
-    msg += "\n📡 *Radar Status:*\n"
+    msg += "\n *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
-    msg += "\n _Turn on notifications!_"
+    msg += "\n🔔 _Turn on notifications!_"
     enviar_alerta_telegram(msg)
     with open(MARKET_PULSE_FILE, 'w') as f:
         f.write(str(datetime.now().hour))
@@ -259,7 +259,7 @@ async def verificar_canais_telegram(ca_address):
             print("⚠️ Session invalid")
             return 0, []
         
-        print(f"🔍 Scanning {len(CANAIS_ALPHA)} channels for CA...")
+        print(f" Scanning {len(CANAIS_ALPHA)} channels for CA...")
         for canal in CANAIS_ALPHA:
             try:
                 entity = await client.get_entity(canal)
@@ -273,7 +273,7 @@ async def verificar_canais_telegram(ca_address):
                 continue
         await client.disconnect()
     except Exception as e:
-        print(f" Telegram connection error: {e}")
+        print(f"❌ Telegram connection error: {e}")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -289,7 +289,7 @@ def enviar_alerta_telegram(mensagem, reply_markup=None, parse_mode="Markdown"):
         if resp.status_code == 200:
             print("✅ Alert sent!")
     except Exception as e:
-        print(f" Error: {e}")
+        print(f"❌ Error: {e}")
 
 def get_gmgn_link(ca, rede):
     rede_map = {'solana': 'sol', 'ethereum': 'eth', 'bsc': 'bsc', 'base': 'base'}
@@ -313,7 +313,6 @@ def aplicar_filtros(par):
     if symbol in TOKENS_BLOQUEADOS:
         return False, f"Token bloqueado ({symbol})"
     
-    # Volume mínimo ajustado para $500 para pegar movimentos iniciais
     if vol < 500:
         return False, f"Volume muito baixo (${vol:,.0f})"
     
@@ -344,44 +343,57 @@ def aplicar_filtros(par):
     return True, None
 
 def buscar_pares_dexscreener():
-    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
+    print(f" [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
     pares_validos = []
     total_brutos = 0
-    motivos_filtro = {} # Para debug
+    motivos_filtro = {}
     
-    for rede in REDES:
-        try:
-            url = f"https://api.dexscreener.com/latest/dex/search?q={rede}"
-            data = requests.get(url, timeout=10).json()
-            pares = data.get('pairs', [])
-            total_brutos += len(pares)
-            print(f"  🔍 {rede.upper()}: {len(pares)} raw pairs found")
-            
-            # AUMENTADO DE 50 PARA 150 PARA PEGAR TOKENS MENOS VOLUMOSOS MAS NOVOS
-            for par in pares[:150]:
-                passou, motivo = aplicar_filtros(par)
-                if passou:
-                    pares_validos.append(par)
-                else:
-                    # Conta os motivos para o relatório de debug
-                    motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
+    # NOVA ESTRATÉGIA: Buscar tokens aleatórios conhecidos em vez de "solana"
+    # Isso evita retornar apenas pares com SOL, ETH, etc.
+    tokens_para_busca = {
+        "solana": ["USDC", "USDT"],  # Busca pares com USDC/USDT na Solana (que terão outros tokens)
+        "ethereum": ["USDC", "USDT", "DAI"],
+        "bsc": ["USDT", "BUSD", "USDC"],
+        "base": ["USDC", "USDbC"]
+    }
+    
+    for rede, tokens_base in tokens_para_busca.items():
+        for token in tokens_base:
+            try:
+                # Busca pares que têm USDC/USDT como base (isso retorna os tokens quote)
+                url = f"https://api.dexscreener.com/latest/dex/search?q={token}%20{rede}"
+                data = requests.get(url, timeout=10).json()
+                pares = data.get('pairs', [])
+                
+                print(f"  🔍 {rede.upper()} ({token}): {len(pares)} raw pairs found")
+                total_brutos += len(pares)
+                
+                for par in pares[:50]:  # Top 50 de cada busca
+                    passou, motivo = aplicar_filtros(par)
+                    if passou:
+                        # Verifica se já não está na lista
+                        if par not in pares_validos:
+                            pares_validos.append(par)
+                    else:
+                        motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
                     
-        except Exception as e:
-            print(f"  ⚠️ Error {rede}: {e}")
+            except Exception as e:
+                print(f"  ⚠️ Error {rede} ({token}): {e}")
     
-    # Imprime o relatório de por que os tokens estão sendo barrados
-    print("\n📊 DEBUG - Motivos de rejeição dos tokens:")
-    for motivo, qtd in sorted(motivos_filtro.items(), key=lambda x: x[1], reverse=True):
-        print(f"  ❌ {motivo}: {qtd} tokens barrados")
-    print("-" * 40)
+    # Imprime o relatório de debug
+    if motivos_filtro:
+        print("\n📊 DEBUG - Motivos de rejeição dos tokens:")
+        for motivo, qtd in sorted(motivos_filtro.items(), key=lambda x: x[1], reverse=True)[:10]:
+            print(f"  ❌ {motivo}: {qtd} tokens barrados")
+        print("-" * 40)
     
     return pares_validos, total_brutos
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, "🥇 HIGH CONFIDENCE"
+        return 1, " HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, "🥈 OPPORTUNITY"
+        return 2, " OPPORTUNITY"
     else:
         return 3, "🥉 HIDDEN GEM"
 
@@ -407,9 +419,9 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     
     msg = (f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
            f" *{descricoes[nivel]}*\n{canais_info}\n\n"
-           f" *Token:* #{token_symbol}\n*CA:* `{ca}`\n*Chain:* {chain.upper()}\n"
+           f"🪙 *Token:* #{token_symbol}\n*CA:* `{ca}`\n*Chain:* {chain.upper()}\n"
            f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
-           f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n*Pump 24h:* {pump_24h}%\n\n⚠️ _DYOR!_")
+           f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n*Pump 24h:* {pump_24h}%\n\n️ _DYOR!_")
     
     keyboard = [[InlineKeyboardButton("🔍 DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
                 [InlineKeyboardButton("📊 Analyses", url=analyses_url)]]
@@ -418,8 +430,8 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
 
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
     if total_alertados > 0:
-        msg = (f"🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
-               f" *Statistics:*\n• Total pairs scanned: `{total_brutos}`\n• Passed filters: `{total_filtrados}`\n"
+        msg = (f" *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+               f"📊 *Statistics:*\n• Total pairs scanned: `{total_brutos}`\n• Passed filters: `{total_filtrados}`\n"
                f"• 🚨 **New alerts sent: `{total_alertados}`**\n• CAs in memory: `{total_memoria}`\n\n"
                f"🌐 *Networks:* SOL | ETH | BSC | BASE\n📡 *Channels:* {len(CANAIS_ALPHA)}\n")
         keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh")]]
@@ -430,13 +442,13 @@ async def main():
     print("🦍 PrimeApe 7 Started...")
     if not CANAIS_ALPHA:
         carregar_canais()
-    print(f"📡 Monitoring {len(CANAIS_ALPHA)} channels")
+    print(f" Monitoring {len(CANAIS_ALPHA)} channels")
     
     if verificar_market_pulse():
         enviar_market_pulse()
     
     cas_enviados = carregar_cas_enviados()
-    print(f"📋 {len(cas_enviados)} CAs in memory")
+    print(f" {len(cas_enviados)} CAs in memory")
     
     oportunidades, total_brutos = buscar_pares_dexscreener()
     print(f"🎯 {len(oportunidades)} opportunities passed filters!")
