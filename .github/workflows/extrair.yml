@@ -30,10 +30,15 @@ jobs:
         REPO_NAME: ${{ secrets.REPO_NAME }}
       run: python extrair_canais.py
     
-    - name: Commit channels list
+    - name: Commit and push channels list
+      env:
+        PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+        REPO_OWNER: ${{ secrets.REPO_OWNER }}
+        REPO_NAME: ${{ secrets.REPO_NAME }}
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git add channels_list.json
         git commit -m "📋 Lista de canais extraída automaticamente" || echo "Nada para commitar"
+        git remote set-url origin https://x-access-token:${PAT_TOKEN}@github.com/${REPO_OWNER}/${REPO_NAME}.git
         git push
