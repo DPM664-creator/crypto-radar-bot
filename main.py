@@ -219,7 +219,7 @@ def enviar_market_pulse():
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
-    msg += "\n _Turn on notifications!_"
+    msg += "\n🔔 _Turn on notifications!_"
     enviar_alerta_telegram(msg)
     with open(MARKET_PULSE_FILE, 'w') as f:
         f.write(str(datetime.now().hour))
@@ -295,7 +295,7 @@ def enviar_alerta_telegram(mensagem, reply_markup=None, parse_mode="Markdown"):
         if resp.status_code == 200:
             print("✅ Alert sent!")
     except Exception as e:
-        print(f" Error: {e}")
+        print(f"❌ Error: {e}")
 
 def get_gmgn_link(ca, rede):
     rede_map = {'solana': 'sol', 'ethereum': 'eth', 'bsc': 'bsc', 'base': 'base'}
@@ -416,8 +416,22 @@ def buscar_tokens_gmgn():
     total_brutos = 0
     motivos_filtro = {}
     
+    # DEBUG COMPLETO - Verificar credenciais
+    print(f"  🔍 DEBUG: GMGN_API_KEY existe: {bool(GMGN_API_KEY)}")
+    print(f"  🔍 DEBUG: GMGN_PRIVATE_KEY existe: {bool(GMGN_PRIVATE_KEY)}")
+    
+    if GMGN_API_KEY:
+        print(f"  🔍 DEBUG: GMGN_API_KEY length: {len(GMGN_API_KEY)} chars")
+        print(f"  🔍 DEBUG: GMGN_API_KEY starts with: {GMGN_API_KEY[:10]}...")
+    
+    if GMGN_PRIVATE_KEY:
+        print(f"  🔍 DEBUG: GMGN_PRIVATE_KEY length: {len(GMGN_PRIVATE_KEY)} chars")
+        print(f"  🔍 DEBUG: GMGN_PRIVATE_KEY starts with: {GMGN_PRIVATE_KEY[:30]}...")
+        print(f"  🔍 DEBUG: Contains BEGIN PRIVATE KEY: {'-----BEGIN PRIVATE KEY-----' in GMGN_PRIVATE_KEY}")
+    
     if not GMGN_API_KEY or not GMGN_PRIVATE_KEY:
         print("  ⚠️ GMGN credentials not configured")
+        print("  💡 Verifique se os secrets GMGN_API_KEY e GMGN_PRIVATE_KEY estão configurados no GitHub")
         return tokens_validos, total_brutos, motivos_filtro
     
     redes_gmgn = {
@@ -432,6 +446,8 @@ def buscar_tokens_gmgn():
             path = f"/defi/quotation/v1/trenches/{chain_short}"
             timestamp = str(int(datetime.now().timestamp()))
             signature = criar_assinatura_gmgn("GET", path, timestamp)
+            
+            print(f"  🔍 DEBUG: Signature created for {chain_short}: {bool(signature)}")
             
             url = f"https://gmgn.ai{path}"
             headers = {
@@ -479,6 +495,7 @@ def buscar_tokens_gmgn():
                         motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
             else:
                 print(f"  ⚠️ GMGN {chain_short}: HTTP {resp.status_code}")
+                print(f"  🔍 DEBUG: Response: {resp.text[:200]}")
                 
         except Exception as e:
             print(f"  ⚠️ Error GMGN {chain_short}: {e}")
@@ -487,9 +504,9 @@ def buscar_tokens_gmgn():
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, "🥇 HIGH CONFIDENCE"
+        return 1, " HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, "🥈 OPPORTUNITY"
+        return 2, " OPPORTUNITY"
     else:
         return 3, "🥉 HIDDEN GEM"
 
@@ -506,7 +523,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
@@ -519,14 +536,14 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
            f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
            f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n*Pump 24h:* {pump_24h}%\n\n⚠️ _DYOR!_")
     
-    keyboard = [[InlineKeyboardButton(" DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
+    keyboard = [[InlineKeyboardButton("🔍 DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
                 [InlineKeyboardButton("📊 Analyses", url=analyses_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     return msg, reply_markup
 
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
     if total_alertados > 0:
-        msg = (f"🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+        msg = (f" *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
                f"📊 *Statistics:*\n• Total pairs scanned: `{total_brutos}`\n• Passed filters: `{total_filtrados}`\n"
                f"• 🚨 **New alerts sent: `{total_alertados}`**\n• CAs in memory: `{total_memoria}`\n\n"
                f"🌐 *Networks:* SOL | ETH | BSC | BASE\n📡 *Channels:* {len(CANAIS_ALPHA)}\n")
@@ -535,7 +552,7 @@ async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, tot
 
 async def main():
     global CANAIS_ALPHA
-    print(" PrimeApe 7 Started...")
+    print("🦍 PrimeApe 7 Started...")
     if not CANAIS_ALPHA:
         carregar_canais()
     print(f"📡 Monitoring {len(CANAIS_ALPHA)} channels")
@@ -552,7 +569,7 @@ async def main():
     
     # Busca GMGN (COM AUTENTICAÇÃO RSA)
     oportunidades_gmgn, total_gmgn, motivos_gmgn = buscar_tokens_gmgn()
-    print(f"🎯 GMGN: {len(oportunidades_gmgn)} opportunities passed filters!")
+    print(f" GMGN: {len(oportunidades_gmgn)} opportunities passed filters!")
     
     # Une os resultados
     oportunidades = oportunidades_dex + oportunidades_gmgn
