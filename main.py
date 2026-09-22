@@ -2,7 +2,12 @@ import requests
 import os
 import asyncio
 import json
+import base64
+import hashlib
 from datetime import datetime
+from Crypto.PublicKey import RSA
+from Crypto.Signature import pkcs1_15
+from Crypto.Hash import SHA256
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -13,6 +18,8 @@ TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
 TELEGRAM_SESSION_STRING = os.getenv('TELEGRAM_SESSION_STRING')
+GMGN_API_KEY = os.getenv('GMGN_API_KEY')
+GMGN_PRIVATE_KEY = os.getenv('GMGN_PRIVATE_KEY')
 PAT_TOKEN = os.getenv('PAT_TOKEN')
 REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
@@ -111,7 +118,7 @@ def criar_ou_atualizar_telegraph(tokens_list):
         
         if channels:
             canais_str = ", ".join([f"@{c}" for c in channels])
-            content_html.append({"tag": "p", "children": [f" Mentioned in: {canais_str}"]})
+            content_html.append({"tag": "p", "children": [f"📢 Mentioned in: {canais_str}"]})
         content_html.append({"tag": "hr"})
     
     content_html.append({"tag": "p", "children": ["_Powered by PrimeApe 7 _"]})
@@ -174,7 +181,6 @@ def commitar_no_github():
         if not os.path.exists(arquivo):
             continue
         try:
-            import base64
             with open(arquivo, 'r', encoding='utf-8') as f:
                 content = f.read()
             content_b64 = base64.b64encode(content.encode()).decode()
@@ -205,11 +211,11 @@ def enviar_market_pulse():
     precos = get_preco_global()
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     if precos:
-        msg += " *Global Market:*\n"
+        msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
             msg += f"*{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
-    msg += "\n *Radar Status:*\n"
+    msg += "\n📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
@@ -273,7 +279,7 @@ async def verificar_canais_telegram(ca_address):
                 continue
         await client.disconnect()
     except Exception as e:
-        print(f" Telegram connection error: {e}")
+        print(f"❌ Telegram connection error: {e}")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -289,7 +295,7 @@ def enviar_alerta_telegram(mensagem, reply_markup=None, parse_mode="Markdown"):
         if resp.status_code == 200:
             print("✅ Alert sent!")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f" Error: {e}")
 
 def get_gmgn_link(ca, rede):
     rede_map = {'solana': 'sol', 'ethereum': 'eth', 'bsc': 'bsc', 'base': 'base'}
@@ -298,6 +304,31 @@ def get_gmgn_link(ca, rede):
 
 def get_dexscreener_link(ca, rede):
     return f"https://dexscreener.com/{rede.lower()}/{ca}"
+
+def criar_assinatura_gmgn(method, path, timestamp):
+    """Cria assinatura RSA para API GMGN"""
+    if not GMGN_PRIVATE_KEY:
+        return ""
+    
+    try:
+        # Monta a mensagem a ser assinada
+        message = f"{method}{path}{timestamp}"
+        
+        # Importa a chave privada
+        private_key = RSA.import_key(GMGN_PRIVATE_KEY)
+        
+        # Cria hash SHA256
+        h = SHA256.new(message.encode('utf-8'))
+        
+        # Assina com RSA-PKCS1v15
+        signer = pkcs1_15.new(private_key)
+        signature = signer.sign(h)
+        
+        # Retorna em base64
+        return base64.b64encode(signature).decode('utf-8')
+    except Exception as e:
+        print(f"⚠️ Erro ao criar assinatura GMGN: {e}")
+        return ""
 
 def aplicar_filtros(par):
     """Retorna (True, None) se passar, ou (False, 'Motivo') se falhar"""
@@ -379,13 +410,16 @@ def buscar_pares_dexscreener():
     return pares_validos, total_brutos, motivos_filtro
 
 def buscar_tokens_gmgn():
-    """Busca tokens recém-lançados via GMGN.AI Trenches"""
+    """Busca tokens recém-lançados via GMGN.AI Trenches com autenticação RSA"""
     print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning GMGN.AI...")
     tokens_validos = []
     total_brutos = 0
     motivos_filtro = {}
     
-    # Mapeamento de redes para GMGN
+    if not GMGN_API_KEY or not GMGN_PRIVATE_KEY:
+        print("  ⚠️ GMGN credentials not configured")
+        return tokens_validos, total_brutos, motivos_filtro
+    
     redes_gmgn = {
         'solana': 'sol',
         'ethereum': 'eth',
@@ -395,20 +429,29 @@ def buscar_tokens_gmgn():
     
     for rede, chain_short in redes_gmgn.items():
         try:
-            # Endpoint de Trenches (tokens novos/trending)
-            url = f"https://gmgn.ai/defi/quotation/v1/trenches/{chain_short}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
+            path = f"/defi/quotation/v1/trenches/{chain_short}"
+            timestamp = str(int(datetime.now().timestamp()))
+            signature = criar_assinatura_gmgn("GET", path, timestamp)
+            
+            url = f"https://gmgn.ai{path}"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'X-API-Key': GMGN_API_KEY,
+                'X-Timestamp': timestamp,
+                'X-Signature': signature,
+                'Accept': 'application/json'
+            }
+            
             resp = requests.get(url, headers=headers, timeout=10)
             
             if resp.status_code == 200:
                 data = resp.json()
                 tokens = data.get('data', {}).get('trenches', [])
                 
-                print(f"  🔍 GMGN {chain_short.upper()}: {len(tokens)} tokens found")
+                print(f"  ✅ GMGN {chain_short.upper()}: {len(tokens)} tokens found")
                 total_brutos += len(tokens)
                 
-                for token in tokens[:50]:  # Top 50 de cada rede
-                    # Converte formato GMGN para formato padrão
+                for token in tokens[:50]:
                     par = {
                         'baseToken': {
                             'symbol': token.get('symbol', ''),
@@ -416,7 +459,7 @@ def buscar_tokens_gmgn():
                         },
                         'pairAddress': token.get('address', ''),
                         'chainId': rede,
-                        'priceUsd': token.get('price', '0'),
+                        'priceUsd': str(token.get('price', 0)),
                         'liquidity': {'usd': token.get('liquidity', 0)},
                         'volume': {'h24': token.get('volume_24h', 0)},
                         'priceChange': {
@@ -448,7 +491,7 @@ def classificar_oportunidade(num_canais):
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
-        return 3, " HIDDEN GEM"
+        return 3, "🥉 HIDDEN GEM"
 
 def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, analyses_url):
     liq = par.get('liquidity', {}).get('usd', 0)
@@ -463,7 +506,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
+    emojis = {1: "", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
@@ -507,7 +550,7 @@ async def main():
     oportunidades_dex, total_dex, motivos_dex = buscar_pares_dexscreener()
     print(f"🎯 DexScreener: {len(oportunidades_dex)} opportunities passed filters!")
     
-    # Busca GMGN
+    # Busca GMGN (COM AUTENTICAÇÃO RSA)
     oportunidades_gmgn, total_gmgn, motivos_gmgn = buscar_tokens_gmgn()
     print(f"🎯 GMGN: {len(oportunidades_gmgn)} opportunities passed filters!")
     
