@@ -85,7 +85,7 @@ def salvar_telegraph_config(config):
 def criar_ou_atualizar_telegraph(tokens_list):
     config = carregar_telegraph_config()
     content_html = []
-    content_html.append({"tag": "p", "children": [f" PrimeApe 7 Radar - Last scan: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"]})
+    content_html.append({"tag": "p", "children": [f"🦍 PrimeApe 7 Radar - Last scan: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}"]})
     content_html.append({"tag": "p", "children": [f"📊 Total gems found: {len(tokens_list)}"]})
     content_html.append({"tag": "hr"})
     
@@ -111,7 +111,7 @@ def criar_ou_atualizar_telegraph(tokens_list):
         
         if channels:
             canais_str = ", ".join([f"@{c}" for c in channels])
-            content_html.append({"tag": "p", "children": [f"📢 Mentioned in: {canais_str}"]})
+            content_html.append({"tag": "p", "children": [f" Mentioned in: {canais_str}"]})
         content_html.append({"tag": "hr"})
     
     content_html.append({"tag": "p", "children": ["_Powered by PrimeApe 7 _"]})
@@ -130,7 +130,7 @@ def criar_ou_atualizar_telegraph(tokens_list):
             else:
                 return criar_nova_telegraph(title, content_html)
         except Exception as e:
-            print(f" Error: {e}")
+            print(f"❌ Error: {e}")
             return criar_nova_telegraph(title, content_html)
     else:
         return criar_nova_telegraph(title, content_html)
@@ -164,7 +164,7 @@ def criar_nova_telegraph(title, content_html):
         else:
             return None
     except Exception as e:
-        print(f" Error: {e}")
+        print(f"❌ Error: {e}")
         return None
 
 def commitar_no_github():
@@ -205,7 +205,7 @@ def enviar_market_pulse():
     precos = get_preco_global()
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     if precos:
-        msg += "📊 *Global Market:*\n"
+        msg += " *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
             msg += f"*{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
@@ -213,7 +213,7 @@ def enviar_market_pulse():
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
-    msg += "\n🔔 _Turn on notifications!_"
+    msg += "\n _Turn on notifications!_"
     enviar_alerta_telegram(msg)
     with open(MARKET_PULSE_FILE, 'w') as f:
         f.write(str(datetime.now().hour))
@@ -259,7 +259,7 @@ async def verificar_canais_telegram(ca_address):
             print("⚠️ Session invalid")
             return 0, []
         
-        print(f" Scanning {len(CANAIS_ALPHA)} channels for CA...")
+        print(f"🔍 Scanning {len(CANAIS_ALPHA)} channels for CA...")
         for canal in CANAIS_ALPHA:
             try:
                 entity = await client.get_entity(canal)
@@ -273,7 +273,7 @@ async def verificar_canais_telegram(ca_address):
                 continue
         await client.disconnect()
     except Exception as e:
-        print(f"❌ Telegram connection error: {e}")
+        print(f" Telegram connection error: {e}")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -343,15 +343,13 @@ def aplicar_filtros(par):
     return True, None
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning DexScreener...")
     pares_validos = []
     total_brutos = 0
     motivos_filtro = {}
     
-    # NOVA ESTRATÉGIA: Buscar tokens aleatórios conhecidos em vez de "solana"
-    # Isso evita retornar apenas pares com SOL, ETH, etc.
     tokens_para_busca = {
-        "solana": ["USDC", "USDT"],  # Busca pares com USDC/USDT na Solana (que terão outros tokens)
+        "solana": ["USDC", "USDT"],
         "ethereum": ["USDC", "USDT", "DAI"],
         "bsc": ["USDT", "BUSD", "USDC"],
         "base": ["USDC", "USDbC"]
@@ -360,7 +358,6 @@ def buscar_pares_dexscreener():
     for rede, tokens_base in tokens_para_busca.items():
         for token in tokens_base:
             try:
-                # Busca pares que têm USDC/USDT como base (isso retorna os tokens quote)
                 url = f"https://api.dexscreener.com/latest/dex/search?q={token}%20{rede}"
                 data = requests.get(url, timeout=10).json()
                 pares = data.get('pairs', [])
@@ -368,10 +365,9 @@ def buscar_pares_dexscreener():
                 print(f"  🔍 {rede.upper()} ({token}): {len(pares)} raw pairs found")
                 total_brutos += len(pares)
                 
-                for par in pares[:50]:  # Top 50 de cada busca
+                for par in pares[:50]:
                     passou, motivo = aplicar_filtros(par)
                     if passou:
-                        # Verifica se já não está na lista
                         if par not in pares_validos:
                             pares_validos.append(par)
                     else:
@@ -380,22 +376,79 @@ def buscar_pares_dexscreener():
             except Exception as e:
                 print(f"  ⚠️ Error {rede} ({token}): {e}")
     
-    # Imprime o relatório de debug
-    if motivos_filtro:
-        print("\n📊 DEBUG - Motivos de rejeição dos tokens:")
-        for motivo, qtd in sorted(motivos_filtro.items(), key=lambda x: x[1], reverse=True)[:10]:
-            print(f"  ❌ {motivo}: {qtd} tokens barrados")
-        print("-" * 40)
+    return pares_validos, total_brutos, motivos_filtro
+
+def buscar_tokens_gmgn():
+    """Busca tokens recém-lançados via GMGN.AI Trenches"""
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning GMGN.AI...")
+    tokens_validos = []
+    total_brutos = 0
+    motivos_filtro = {}
     
-    return pares_validos, total_brutos
+    # Mapeamento de redes para GMGN
+    redes_gmgn = {
+        'solana': 'sol',
+        'ethereum': 'eth',
+        'bsc': 'bsc',
+        'base': 'base'
+    }
+    
+    for rede, chain_short in redes_gmgn.items():
+        try:
+            # Endpoint de Trenches (tokens novos/trending)
+            url = f"https://gmgn.ai/defi/quotation/v1/trenches/{chain_short}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            resp = requests.get(url, headers=headers, timeout=10)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                tokens = data.get('data', {}).get('trenches', [])
+                
+                print(f"  🔍 GMGN {chain_short.upper()}: {len(tokens)} tokens found")
+                total_brutos += len(tokens)
+                
+                for token in tokens[:50]:  # Top 50 de cada rede
+                    # Converte formato GMGN para formato padrão
+                    par = {
+                        'baseToken': {
+                            'symbol': token.get('symbol', ''),
+                            'address': token.get('address', '')
+                        },
+                        'pairAddress': token.get('address', ''),
+                        'chainId': rede,
+                        'priceUsd': token.get('price', '0'),
+                        'liquidity': {'usd': token.get('liquidity', 0)},
+                        'volume': {'h24': token.get('volume_24h', 0)},
+                        'priceChange': {
+                            'h1': token.get('price_change_1h', 0),
+                            'h24': token.get('price_change_24h', 0)
+                        },
+                        'fdv': token.get('market_cap', 0),
+                        'marketCap': token.get('market_cap', 0),
+                        'pairCreatedAt': token.get('created_at', 0)
+                    }
+                    
+                    passou, motivo = aplicar_filtros(par)
+                    if passou:
+                        if par not in tokens_validos:
+                            tokens_validos.append(par)
+                    else:
+                        motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
+            else:
+                print(f"  ⚠️ GMGN {chain_short}: HTTP {resp.status_code}")
+                
+        except Exception as e:
+            print(f"  ⚠️ Error GMGN {chain_short}: {e}")
+    
+    return tokens_validos, total_brutos, motivos_filtro
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, " HIGH CONFIDENCE"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, " OPPORTUNITY"
+        return 2, "🥈 OPPORTUNITY"
     else:
-        return 3, "🥉 HIDDEN GEM"
+        return 3, " HIDDEN GEM"
 
 def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, analyses_url):
     liq = par.get('liquidity', {}).get('usd', 0)
@@ -410,7 +463,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
@@ -418,19 +471,19 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}" if canais_mencionados else ""
     
     msg = (f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
-           f" *{descricoes[nivel]}*\n{canais_info}\n\n"
+           f"📌 *{descricoes[nivel]}*\n{canais_info}\n\n"
            f"🪙 *Token:* #{token_symbol}\n*CA:* `{ca}`\n*Chain:* {chain.upper()}\n"
            f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
-           f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n*Pump 24h:* {pump_24h}%\n\n️ _DYOR!_")
+           f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n*Pump 24h:* {pump_24h}%\n\n⚠️ _DYOR!_")
     
-    keyboard = [[InlineKeyboardButton("🔍 DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
+    keyboard = [[InlineKeyboardButton(" DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
                 [InlineKeyboardButton("📊 Analyses", url=analyses_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     return msg, reply_markup
 
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
     if total_alertados > 0:
-        msg = (f" *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+        msg = (f"🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
                f"📊 *Statistics:*\n• Total pairs scanned: `{total_brutos}`\n• Passed filters: `{total_filtrados}`\n"
                f"• 🚨 **New alerts sent: `{total_alertados}`**\n• CAs in memory: `{total_memoria}`\n\n"
                f"🌐 *Networks:* SOL | ETH | BSC | BASE\n📡 *Channels:* {len(CANAIS_ALPHA)}\n")
@@ -439,21 +492,55 @@ async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, tot
 
 async def main():
     global CANAIS_ALPHA
-    print("🦍 PrimeApe 7 Started...")
+    print(" PrimeApe 7 Started...")
     if not CANAIS_ALPHA:
         carregar_canais()
-    print(f" Monitoring {len(CANAIS_ALPHA)} channels")
+    print(f"📡 Monitoring {len(CANAIS_ALPHA)} channels")
     
     if verificar_market_pulse():
         enviar_market_pulse()
     
     cas_enviados = carregar_cas_enviados()
-    print(f" {len(cas_enviados)} CAs in memory")
+    print(f"📋 {len(cas_enviados)} CAs in memory")
     
-    oportunidades, total_brutos = buscar_pares_dexscreener()
-    print(f"🎯 {len(oportunidades)} opportunities passed filters!")
+    # Busca DexScreener
+    oportunidades_dex, total_dex, motivos_dex = buscar_pares_dexscreener()
+    print(f"🎯 DexScreener: {len(oportunidades_dex)} opportunities passed filters!")
     
-    novas = [op for op in oportunidades if op.get('pairAddress') not in cas_enviados]
+    # Busca GMGN
+    oportunidades_gmgn, total_gmgn, motivos_gmgn = buscar_tokens_gmgn()
+    print(f"🎯 GMGN: {len(oportunidades_gmgn)} opportunities passed filters!")
+    
+    # Une os resultados
+    oportunidades = oportunidades_dex + oportunidades_gmgn
+    total_brutos = total_dex + total_gmgn
+    
+    # Merge dos motivos de filtro para debug
+    motivos_filtro = {}
+    for motivo, qtd in motivos_dex.items():
+        motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + qtd
+    for motivo, qtd in motivos_gmgn.items():
+        motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + qtd
+    
+    # Imprime relatório de debug
+    if motivos_filtro:
+        print("\n📊 DEBUG - Motivos de rejeição dos tokens:")
+        for motivo, qtd in sorted(motivos_filtro.items(), key=lambda x: x[1], reverse=True)[:10]:
+            print(f"  ❌ {motivo}: {qtd} tokens barrados")
+        print("-" * 40)
+    
+    # Remove duplicatas baseado no pairAddress
+    seen = set()
+    oportunidades_unicas = []
+    for op in oportunidades:
+        addr = op.get('pairAddress', '')
+        if addr and addr not in seen:
+            seen.add(addr)
+            oportunidades_unicas.append(op)
+    
+    print(f"🎯 Total unique opportunities: {len(oportunidades_unicas)}")
+    
+    novas = [op for op in oportunidades_unicas if op.get('pairAddress') not in cas_enviados]
     print(f"✨ {len(novas)} NEW opportunities")
     
     novas.sort(key=lambda x: x.get('liquidity', {}).get('usd', 0) + x.get('volume', {}).get('h24', 0), reverse=True)
@@ -490,7 +577,7 @@ async def main():
         cas_enviados.extend(novos_cas)
         salvar_cas_enviados(cas_enviados)
         print(f"\n💾 {len(novos_cas)} new CAs saved")
-        await enviar_status_scan(total_brutos, len(oportunidades), total_alertados, len(cas_enviados))
+        await enviar_status_scan(total_brutos, len(oportunidades_unicas), total_alertados, len(cas_enviados))
     else:
         print("\n🔄 No new opportunities - scanning continues...")
     
