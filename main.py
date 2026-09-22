@@ -26,9 +26,38 @@ PULSE_CONTROL_FILE = "last_pulse_hour.txt"
 MARKET_PULSE_FILE = "last_market_pulse.txt"
 CHANNELS_FILE = "channels_list.json"
 
-TOKENS_NATIVOS = [
+# Tokens que NÃO queremos (consolidados + nativos + stablecoins)
+# BLOQUEIO TOTAL - só aparecem GEMAS puras
+TOKENS_BLOQUEADOS = [
+    # Nativos das redes
     'SOL', 'ETH', 'BNB', 'MATIC', 'AVAX', 'FTM', 'ARB', 'OP', 'BASE',
-    'USDC', 'USDT', 'DAI', 'WETH', 'WSOL', 'WBNB', 'WBTC'
+    'NEAR', 'ATOM', 'DOT', 'ADA', 'XRP', 'LTC', 'BCH', 'TRX', 'TON',
+    'POL', 'APT', 'SUI', 'SEI', 'TIA', 'JUP', 'RAY', 'ORCA',
+    
+    # Stablecoins
+    'USDT', 'USDC', 'DAI', 'BUSD', 'USDP', 'TUSD', 'USDD', 'FRAX',
+    'PYUSD', 'GUSD', 'FDUSD', 'TUSD', 'LUSD', 'SUSD',
+    
+    # Wrapped tokens
+    'WETH', 'WSOL', 'WBNB', 'WMATIC', 'WAVAX', 'WFTM', 'WARB', 'WOP',
+    'WBTC', 'RENBTC', 'TBTC',
+    
+    # Tokens consolidados / Blue chips
+    'BTC', 'LINK', 'UNI', 'AAVE', 'SUSHI', 'CRV', 'COMP', 'MKR', 'SNX',
+    'DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'BOME',
+    'JUP', 'RAY', 'ORCA', 'MNGO', 'SRM', 'FTT',
+    
+    # Tokens de infraestrutura conhecidos
+    'USDC', 'USDT', 'DAI', 'FRAX', 'LUSD',
+    'AAVE', 'COMP', 'MKR', 'SNX', 'YFI', 'SUSHI', 'CRV', 'BAL',
+    'LDO', 'RPL', 'CBETH', 'STETH', 'RETH',
+    
+    # Memecoins famosas (já consolidadas)
+    'DOGE', 'SHIB', 'PEPE', 'FLOKI', 'BONK', 'WIF', 'BOME',
+    'MYRO', 'POPCAT', 'MOG', 'TURBO', 'MILADY',
+    
+    # Tokens de rede específicos
+    'BSC', 'POL', 'ARB', 'OP', 'MATIC', 'AVAX', 'FTM', 'NEAR', 'ATOM'
 ]
 
 # --- FUNÇÕES DE MEMÓRIA ---
@@ -59,7 +88,7 @@ def carregar_canais():
             print(f"📋 {len(CANAIS_ALPHA)} canais carregados do arquivo")
             return CANAIS_ALPHA
         except Exception as e:
-            print(f"⚠️ Erro ao carregar canais: {e}")
+            print(f"️ Erro ao carregar canais: {e}")
             return []
     else:
         print("⚠️ Arquivo channels_list.json não encontrado")
@@ -106,7 +135,7 @@ def get_preco_global():
         return None
 
 def enviar_market_pulse():
-    print(" Sending Market Pulse...")
+    print("📡 Sending Market Pulse...")
     precos = get_preco_global()
     
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
@@ -115,14 +144,15 @@ def enviar_market_pulse():
         msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
-            emoji = "" if change >= 0 else "🔴"
+            emoji = "🟢" if change >= 0 else "🔴"
             msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
     
     msg += "\n📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += "• Filters: MC $500-$2M | Liq $500-$200k | Vol $5k+ | <14 days\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
-    msg += "\n🔔 _Turn on notifications!_"
+    msg += "• Only PURE GEMS (no consolidated tokens)\n"
+    msg += "\n _Turn on notifications!_"
     
     enviar_alerta_telegram(msg)
     
@@ -165,7 +195,7 @@ def verificar_pulse_horario():
 # --- FUNÇÕES PRINCIPAIS ---
 async def verificar_canais_telegram(ca_address):
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING]):
-        print("️ Session string not configured")
+        print("⚠️ Session string not configured")
         return 0, []
     
     canais_que_mencionaram = []
@@ -174,7 +204,7 @@ async def verificar_canais_telegram(ca_address):
         await client.connect()
         
         if not await client.is_user_authorized():
-            print("⚠️ Session invalid")
+            print("️ Session invalid")
             return 0, []
         
         print(f"🔍 Scanning {len(CANAIS_ALPHA)} channels...")
@@ -217,7 +247,7 @@ def enviar_alerta_telegram(mensagem, reply_markup=None, parse_mode="Markdown"):
         if resp.status_code == 200:
             print("✅ Alert sent!")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f" Error: {e}")
 
 def get_gmgn_link(ca, rede):
     rede_map = {'solana': 'sol', 'ethereum': 'eth', 'bsc': 'bsc', 'base': 'base'}
@@ -228,6 +258,8 @@ def get_dexscreener_link(ca, rede):
     return f"https://dexscreener.com/{rede.lower()}/{ca}"
 
 def aplicar_filtros(par):
+    """Filtros para GEMAS PURAS - SEM tokens consolidados"""
+    
     liq = par.get('liquidity', {}).get('usd', 0)
     mc = par.get('fdv', 0) or par.get('marketCap', 0)
     vol = par.get('volume', {}).get('h24', 0)
@@ -237,31 +269,40 @@ def aplicar_filtros(par):
     base_token = par.get('baseToken', {})
     symbol = base_token.get('symbol', '').upper()
     
-    if symbol in TOKENS_NATIVOS:
+    # ❌ BLOQUEAR TOKENS CONSOLIDADOS/NATIVOS/STABLECOINS
+    if symbol in TOKENS_BLOQUEADOS:
         return False
     
+    # ✅ MARKET CAP: $500 - $2M (GEMAS!)
     if not mc or mc < 500 or mc > 2000000:
         return False
     
+    # ✅ LIQUIDEZ: $500 - $200k
     if not liq or liq < 500 or liq > 200000:
         return False
     
+    # ✅ VOLUME: Mínimo $5k
     if vol < 5000:
         return False
     
+    # ✅ PUMP 24h: 0% - 300%
     if pump_24h < 0 or pump_24h > 300:
         return False
     
+    # ✅ PUMP 1h: Não pode cair mais de 50%
     if pump_1h < -50:
         return False
     
+    # ✅ RAZÃO VOLUME/MC: 0.05 - 3.0
     if vol / mc < 0.05 or vol / mc > 3.0:
         return False
     
+    # ✅ PAR DE NEGOCIAÇÃO válido
     pair_address = par.get('pairAddress', '')
     if not pair_address or len(pair_address) < 10:
         return False
     
+    # ⚠️ FILTRO DE IDADE: < 14 DIAS
     pair_created_at = par.get('pairCreatedAt', 0)
     if pair_created_at:
         created_timestamp = pair_created_at / 1000
@@ -274,7 +315,7 @@ def aplicar_filtros(par):
     return True
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning pairs...")
     pares_validos = []
     total_brutos = 0
     
@@ -296,9 +337,9 @@ def buscar_pares_dexscreener():
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, " HIGH CONFIDENCE"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, " OPPORTUNITY"
+        return 2, "🥈 OPPORTUNITY"
     else:
         return 3, "🥉 HIDDEN GEM"
 
@@ -342,12 +383,12 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
         f"*Vol 24h:* ${vol:,.2f}\n"
         f"*Pump 1h:* {pump}%\n"
         f"*Pump 24h:* {pump_24h}%\n\n"
-        f"️ _DYOR!_"
+        f"⚠️ _DYOR!_"
     )
     
     keyboard = [
         [
-            InlineKeyboardButton("🔍 DexScreener", url=dex_link),
+            InlineKeyboardButton(" DexScreener", url=dex_link),
             InlineKeyboardButton("🔄 Update", callback_data="refresh")
         ],
         [InlineKeyboardButton("📊 Analyses", callback_data="show_analyses")]
@@ -359,15 +400,15 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain):
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
     if total_alertados > 0:
         msg = (
-            " *PRIMEAPE 7 - SCAN STATUS*\n\n"
+            "🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n"
             f"⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
             f"📊 *Statistics:*\n"
             f"• Total pairs scanned: `{total_brutos}`\n"
             f"• Passed filters: `{total_filtrados}`\n"
             f"• 🚨 **New alerts sent: `{total_alertados}`**\n"
             f"• CAs in memory: `{total_memoria}`\n\n"
-            f"🌐 *Networks:* SOL | ETH | BSC | BASE\n"
-            f" *Channels:* {len(CANAIS_ALPHA)}\n"
+            f" *Networks:* SOL | ETH | BSC | BASE\n"
+            f"📡 *Channels:* {len(CANAIS_ALPHA)}\n"
         )
         
         keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh")]]
@@ -425,7 +466,7 @@ async def main():
         
         cas_enviados.extend(novos_cas)
         salvar_cas_enviados(cas_enviados)
-        print(f"\n {len(novos_cas)} new CAs saved")
+        print(f"\n💾 {len(novos_cas)} new CAs saved")
         
         await enviar_status_scan(total_brutos, len(oportunidades), total_alertados, len(cas_enviados))
     else:
