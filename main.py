@@ -293,7 +293,7 @@ def enviar_market_pulse():
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
-    msg += "\n🔔 _Turn on notifications!_"
+    msg += "\n _Turn on notifications!_"
     
     enviar_alerta_telegram(msg)
     
@@ -366,7 +366,7 @@ async def verificar_canais_telegram(ca_address):
         
         await client.disconnect()
     except Exception as e:
-        print(f" Telegram connection error: {e}")
+        print(f"❌ Telegram connection error: {e}")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -399,7 +399,7 @@ def get_dexscreener_link(ca, rede):
     return f"https://dexscreener.com/{rede.lower()}/{ca}"
 
 def aplicar_filtros(par):
-    """Filtros para GEMAS PURAS - SEM tokens consolidados"""
+    """Filtros para GEMAS PURAS - Recém-lançados (48h)"""
     
     liq = par.get('liquidity', {}).get('usd', 0)
     mc = par.get('fdv', 0) or par.get('marketCap', 0)
@@ -414,16 +414,16 @@ def aplicar_filtros(par):
     if symbol in TOKENS_BLOQUEADOS:
         return False
     
-    # ✅ MARKET CAP: $500 - $2M (GEMAS!)
-    if not mc or mc < 500 or mc > 2000000:
-        return False
+    # ✅ SEM FILTRO DE MARKET CAP (qualquer valor)
+    # if not mc or mc < 500 or mc > 2000000:
+    #     return False
     
-    # ✅ LIQUIDEZ: $500 - $200k
-    if not liq or liq < 500 or liq > 200000:
-        return False
+    # ✅ SEM FILTRO DE LIQUIDEZ (qualquer valor)
+    # if not liq or liq < 500 or liq > 200000:
+    #     return False
     
-    # ✅ VOLUME: Mínimo $5k
-    if vol < 5000:
+    # ✅ VOLUME: Mínimo $1k (para evitar tokens totalmente mortos)
+    if vol < 1000:
         return False
     
     # ✅ PUMP 24h: 0% - 300%
@@ -434,24 +434,28 @@ def aplicar_filtros(par):
     if pump_1h < -50:
         return False
     
-    # ✅ RAZÃO VOLUME/MC: 0.05 - 3.0
-    if vol / mc < 0.05 or vol / mc > 3.0:
-        return False
+    # ✅ RAZÃO VOLUME/MC: 0.01 - 5.0 (mais flexível)
+    if mc and mc > 0:
+        if vol / mc < 0.01 or vol / mc > 5.0:
+            return False
     
     # ✅ PAR DE NEGOCIAÇÃO válido
     pair_address = par.get('pairAddress', '')
     if not pair_address or len(pair_address) < 10:
         return False
     
-    # ⚠️ FILTRO DE IDADE: < 14 DIAS
+    # ⚠️ FILTRO DE IDADE: < 48 HORAS (RECÉM-LANÇADO!)
     pair_created_at = par.get('pairCreatedAt', 0)
     if pair_created_at:
         created_timestamp = pair_created_at / 1000
         now_timestamp = datetime.now().timestamp()
-        age_days = (now_timestamp - created_timestamp) / 86400
+        age_hours = (now_timestamp - created_timestamp) / 3600
         
-        if age_days > 14:
+        if age_hours > 48:
             return False
+    else:
+        # Se não tem data de criação, bloqueia por segurança
+        return False
     
     return True
 
@@ -466,13 +470,13 @@ def buscar_pares_dexscreener():
             data = requests.get(url, timeout=10).json()
             pares = data.get('pairs', [])
             total_brutos += len(pares)
-            print(f"   {rede.upper()}: {len(pares)} raw pairs found")
+            print(f"  🔍 {rede.upper()}: {len(pares)} raw pairs found")
             
             for par in pares[:50]:
                 if aplicar_filtros(par):
                     pares_validos.append(par)
         except Exception as e:
-            print(f"  ️ Error {rede}: {e}")
+            print(f"  ⚠️ Error {rede}: {e}")
     
     return pares_validos, total_brutos
 
@@ -497,7 +501,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
         1: "Multiple alpha channels talking!", 
@@ -529,7 +533,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     
     keyboard = [
         [
-            InlineKeyboardButton(" DexScreener", url=dex_link),
+            InlineKeyboardButton("🔍 DexScreener", url=dex_link),
             InlineKeyboardButton("🔄 Update", callback_data="refresh")
         ],
         [InlineKeyboardButton("📊 Analyses", url=analyses_url)]
@@ -546,7 +550,7 @@ async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, tot
             f"📊 *Statistics:*\n"
             f"• Total pairs scanned: `{total_brutos}`\n"
             f"• Passed filters: `{total_filtrados}`\n"
-            f"• 🚨 **New alerts sent: `{total_alertados}`**\n"
+            f"•  **New alerts sent: `{total_alertados}`**\n"
             f"• CAs in memory: `{total_memoria}`\n\n"
             f"🌐 *Networks:* SOL | ETH | BSC | BASE\n"
             f"📡 *Channels:* {len(CANAIS_ALPHA)}\n"
@@ -560,7 +564,7 @@ async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, tot
 async def main():
     global CANAIS_ALPHA
     
-    print(" PrimeApe 7 Started...")
+    print("🦍 PrimeApe 7 Started...")
     
     # Carrega os canais automaticamente
     if not CANAIS_ALPHA:
