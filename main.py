@@ -182,7 +182,6 @@ def criar_ou_atualizar_telegraph(tokens_list):
                 return page_url
             else:
                 print(f"⚠️ Error updating page: {result.get('error')}")
-                # Tenta criar nova
                 return criar_nova_telegraph(title, content_html)
         except Exception as e:
             print(f"❌ Error: {e}")
@@ -194,7 +193,6 @@ def criar_ou_atualizar_telegraph(tokens_list):
 def criar_nova_telegraph(title, content_html):
     """Cria nova página no Telegra.ph"""
     try:
-        # Primeiro, criar conta (se não tiver)
         config = carregar_telegraph_config() or {}
         
         if not config.get('access_token'):
@@ -286,15 +284,13 @@ def enviar_market_pulse():
     msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     
     if precos:
-        msg += " *Global Market:*\n"
+        msg += "📊 *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
-            emoji = "🟢" if change >= 0 else "🔴"
-            msg += f"{emoji} *{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
+            msg += f"*{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
     
-    msg += "\n *Radar Status:*\n"
+    msg += "\n📡 *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
-    msg += "• Filters: MC $500-$2M | Liq $500-$200k | Vol $5k+ | <14 days\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
     msg += "\n🔔 _Turn on notifications!_"
@@ -447,7 +443,7 @@ def aplicar_filtros(par):
     if not pair_address or len(pair_address) < 10:
         return False
     
-    # ️ FILTRO DE IDADE: < 14 DIAS
+    # ⚠️ FILTRO DE IDADE: < 14 DIAS
     pair_created_at = par.get('pairCreatedAt', 0)
     if pair_created_at:
         created_timestamp = pair_created_at / 1000
@@ -470,13 +466,13 @@ def buscar_pares_dexscreener():
             data = requests.get(url, timeout=10).json()
             pares = data.get('pairs', [])
             total_brutos += len(pares)
-            print(f"  🔍 {rede.upper()}: {len(pares)} raw pairs found")
+            print(f"   {rede.upper()}: {len(pares)} raw pairs found")
             
             for par in pares[:50]:
                 if aplicar_filtros(par):
                     pares_validos.append(par)
         except Exception as e:
-            print(f"  ⚠️ Error {rede}: {e}")
+            print(f"  ️ Error {rede}: {e}")
     
     return pares_validos, total_brutos
 
@@ -501,7 +497,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "🥇", 2: "", 3: "🥉"}
+    emojis = {1: "", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {
         1: "Multiple alpha channels talking!", 
@@ -528,12 +524,12 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
         f"*Vol 24h:* ${vol:,.2f}\n"
         f"*Pump 1h:* {pump}%\n"
         f"*Pump 24h:* {pump_24h}%\n\n"
-        f"️ _DYOR!_"
+        f"⚠️ _DYOR!_"
     )
     
     keyboard = [
         [
-            InlineKeyboardButton("🔍 DexScreener", url=dex_link),
+            InlineKeyboardButton(" DexScreener", url=dex_link),
             InlineKeyboardButton("🔄 Update", callback_data="refresh")
         ],
         [InlineKeyboardButton("📊 Analyses", url=analyses_url)]
@@ -552,7 +548,7 @@ async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, tot
             f"• Passed filters: `{total_filtrados}`\n"
             f"• 🚨 **New alerts sent: `{total_alertados}`**\n"
             f"• CAs in memory: `{total_memoria}`\n\n"
-            f" *Networks:* SOL | ETH | BSC | BASE\n"
+            f"🌐 *Networks:* SOL | ETH | BSC | BASE\n"
             f"📡 *Channels:* {len(CANAIS_ALPHA)}\n"
         )
         
@@ -564,7 +560,7 @@ async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, tot
 async def main():
     global CANAIS_ALPHA
     
-    print("🦍 PrimeApe 7 Started...")
+    print(" PrimeApe 7 Started...")
     
     # Carrega os canais automaticamente
     if not CANAIS_ALPHA:
