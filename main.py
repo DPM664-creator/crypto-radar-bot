@@ -64,7 +64,7 @@ def carregar_canais():
             print(f"📋 {len(CANAIS_ALPHA)} canais carregados do arquivo")
             return CANAIS_ALPHA
         except Exception as e:
-            print(f"️ Erro ao carregar canais: {e}")
+            print(f"⚠️ Erro ao carregar canais: {e}")
             return []
     else:
         print("⚠️ Arquivo channels_list.json não encontrado")
@@ -112,7 +112,7 @@ def criar_ou_atualizar_telegraph(tokens_list):
         
         if channels:
             canais_str = ", ".join([f"@{c}" for c in channels])
-            content_html.append({"tag": "p", "children": [f" Mentioned in: {canais_str}"]})
+            content_html.append({"tag": "p", "children": [f"📢 Mentioned in: {canais_str}"]})
         content_html.append({"tag": "hr"})
     
     content_html.append({"tag": "p", "children": ["_Powered by PrimeApe 7 _"]})
@@ -201,19 +201,19 @@ def get_preco_global():
         return None
 
 def enviar_market_pulse():
-    print(" Sending Market Pulse...")
+    print("📡 Sending Market Pulse...")
     precos = get_preco_global()
-    msg = " *PRIMEAPE 7 - MARKET PULSE*\n\n"
+    msg = "🦍 *PRIMEAPE 7 - MARKET PULSE*\n\n"
     if precos:
-        msg += "📊 *Global Market:*\n"
+        msg += " *Global Market:*\n"
         for k, v in [('BTC', precos['BTC']), ('ETH', precos['ETH']), ('SOL', precos['SOL']), ('BNB', precos['BNB'])]:
             change = v.get('usd_24h_change', 0)
             msg += f"*{k}:* ${v['usd']:,.2f} ({change:+.1f}%)\n"
-    msg += "\n📡 *Radar Status:*\n"
+    msg += "\n *Radar Status:*\n"
     msg += "• Scanning: SOL, ETH, BSC, BASE\n"
     msg += f"• Active Channels: {len(CANAIS_ALPHA)}\n"
     msg += "• Only PURE GEMS (no consolidated tokens)\n"
-    msg += "\n🔔 _Turn on notifications!_"
+    msg += "\n _Turn on notifications!_"
     enviar_alerta_telegram(msg)
     with open(MARKET_PULSE_FILE, 'w') as f:
         f.write(str(datetime.now().hour))
@@ -247,33 +247,49 @@ def verificar_pulse_horario():
 
 # --- FUNÇÕES PRINCIPAIS ---
 async def verificar_canais_telegram(ca_address):
+    """Verifica canais com retry e tratamento de erro de session"""
     if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_STRING]):
         print("⚠️ Session string not configured")
         return 0, []
     
     canais_que_mencionaram = []
-    try:
-        client = TelegramClient(StringSession(TELEGRAM_SESSION_STRING), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
-        await client.connect()
-        if not await client.is_user_authorized():
-            print("⚠️ Session invalid")
-            return 0, []
-        
-        print(f"🔍 Scanning {len(CANAIS_ALPHA)} channels for CA...")
-        for canal in CANAIS_ALPHA:
-            try:
-                entity = await client.get_entity(canal)
-                async for message in client.iter_messages(entity, limit=50):
-                    if ca_address.lower() in message.text.lower():
-                        canal_nome = entity.username if entity.username else entity.title
-                        if canal_nome not in canais_que_mencionaram:
-                            canais_que_mencionaram.append(canal_nome)
-                        break
-            except Exception as e:
-                continue
-        await client.disconnect()
-    except Exception as e:
-        print(f"❌ Telegram connection error: {e}")
+    max_tentativas = 2
+    
+    for tentativa in range(max_tentativas):
+        try:
+            client = TelegramClient(StringSession(TELEGRAM_SESSION_STRING), int(TELEGRAM_API_ID), TELEGRAM_API_HASH)
+            await client.connect()
+            
+            if not await client.is_user_authorized():
+                print("⚠️ Session invalid")
+                return 0, []
+            
+            print(f" Scanning {len(CANAIS_ALPHA)} channels for CA... (tentativa {tentativa + 1})")
+            
+            # Limita a 100 canais para evitar timeout
+            canais_para_verificar = CANAIS_ALPHA[:100]
+            
+            for canal in canais_para_verificar:
+                try:
+                    entity = await client.get_entity(canal)
+                    async for message in client.iter_messages(entity, limit=30):
+                        if ca_address.lower() in message.text.lower():
+                            canal_nome = entity.username if entity.username else entity.title
+                            if canal_nome not in canais_que_mencionaram:
+                                canais_que_mencionaram.append(canal_nome)
+                            break
+                except Exception as e:
+                    continue
+            
+            await client.disconnect()
+            break  # Se funcionou, sai do loop
+            
+        except Exception as e:
+            print(f"⚠️ Telegram error (tentativa {tentativa + 1}): {e}")
+            if tentativa < max_tentativas - 1:
+                await asyncio.sleep(3)  # Aguarda antes de retry
+            else:
+                print(f"❌ Telegram connection failed after {max_tentativas} attempts")
     
     return len(canais_que_mencionaram), canais_que_mencionaram
 
@@ -288,6 +304,8 @@ def enviar_alerta_telegram(mensagem, reply_markup=None, parse_mode="Markdown"):
         resp = requests.post(url, json=data, timeout=10)
         if resp.status_code == 200:
             print("✅ Alert sent!")
+        else:
+            print(f"️ Alert failed: HTTP {resp.status_code}")
     except Exception as e:
         print(f"❌ Error: {e}")
 
@@ -343,7 +361,7 @@ def aplicar_filtros(par):
     return True, None
 
 def buscar_pares_dexscreener():
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Scanning DexScreener...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning DexScreener...")
     pares_validos = []
     total_brutos = 0
     motivos_filtro = {}
@@ -380,68 +398,81 @@ def buscar_pares_dexscreener():
 
 def buscar_tokens_pumpfun():
     """Busca tokens recém-lançados via PumpPortal.fun (API PÚBLICA ESTÁVEL)"""
-    print(f" [{datetime.now().strftime('%H:%M:%S')}] Scanning PumpPortal.fun...")
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning PumpPortal.fun...")
     tokens_validos = []
     total_brutos = 0
     motivos_filtro = {}
     
-    try:
-        # Endpoint público e estável do PumpPortal
-        url = "https://api-v2.pumpportal.fun/api/data/recent"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-            'Accept': 'application/json'
-        }
-        resp = requests.get(url, headers=headers, timeout=15)
-        
-        if resp.status_code == 200:
-            data = resp.json()
-            tokens = data if isinstance(data, list) else data.get('data', [])
+    # URLs alternativas do PumpPortal
+    urls_pumpportal = [
+        "https://pumpportal.fun/api/data/recent",
+        "https://api.pumpportal.fun/api/data/recent",
+        "https://frontend-api.pump.fun/coins?offset=0&limit=50"
+    ]
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json'
+    }
+    
+    for url in urls_pumpportal:
+        try:
+            print(f"  🔍 Tentando: {url}")
+            resp = requests.get(url, headers=headers, timeout=15)
             
-            print(f"  🔍 PumpPortal: {len(tokens)} tokens recentes encontrados")
-            total_brutos += len(tokens)
-            
-            for token in tokens[:50]:
-                ca = token.get('address', '') or token.get('mint', '')
-                symbol = token.get('symbol', 'UNKNOWN')
-                mc = token.get('marketCap', 0) or token.get('fdv', 0) or 0
-                vol = token.get('volume', 0) or token.get('volume_24h', 0) or 0
-                liq = token.get('liquidity', 0) or token.get('usd_liquidity', 0) or 0
-                created_at = token.get('timestamp', 0) or token.get('created_at', 0)
-                price_change_1h = token.get('priceChange', {}).get('h1', 0) if isinstance(token.get('priceChange'), dict) else 0
-                price_change_24h = token.get('priceChange', {}).get('h24', 0) if isinstance(token.get('priceChange'), dict) else 0
+            if resp.status_code == 200:
+                data = resp.json()
+                tokens = data if isinstance(data, list) else data.get('data', [])
                 
-                par = {
-                    'baseToken': {'symbol': symbol, 'address': ca},
-                    'pairAddress': ca,
-                    'chainId': 'solana',
-                    'priceUsd': str(token.get('price', 0)),
-                    'liquidity': {'usd': liq},
-                    'volume': {'h24': vol},
-                    'priceChange': {'h1': price_change_1h, 'h24': price_change_24h},
-                    'fdv': mc,
-                    'marketCap': mc,
-                    'pairCreatedAt': created_at * 1000 if created_at and created_at < 10000000000 else created_at
-                }
+                print(f"  ✅ PumpPortal funcionou: {len(tokens)} tokens encontrados")
+                total_brutos += len(tokens)
                 
-                passou, motivo = aplicar_filtros(par)
-                if passou:
-                    if par not in tokens_validos:
-                        tokens_validos.append(par)
-                else:
-                    motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
-        else:
-            print(f"  ⚠️ PumpPortal API: HTTP {resp.status_code}")
-            # Tenta endpoint alternativo
-            try:
-                url2 = "https://frontend-api.pump.fun/coins?offset=0&limit=50"
-                resp2 = requests.get(url2, headers=headers, timeout=10)
-                if resp2.status_code == 200:
-                    print(f"  ✅ Pump.fun alternativo funcionou!")
-            except:
-                pass
-    except Exception as e:
-        print(f"  ⚠️ Erro ao buscar PumpPortal: {e}")
+                for token in tokens[:50]:
+                    ca = token.get('address', '') or token.get('mint', '')
+                    symbol = token.get('symbol', 'UNKNOWN')
+                    mc = token.get('marketCap', 0) or token.get('fdv', 0) or 0
+                    vol = token.get('volume', 0) or token.get('volume_24h', 0) or 0
+                    liq = token.get('liquidity', 0) or token.get('usd_liquidity', 0) or 0
+                    created_at = token.get('timestamp', 0) or token.get('created_at', 0)
+                    
+                    # Trata priceChange que pode ser dict ou valor direto
+                    price_change_data = token.get('priceChange', {})
+                    if isinstance(price_change_data, dict):
+                        price_change_1h = price_change_data.get('h1', 0)
+                        price_change_24h = price_change_data.get('h24', 0)
+                    else:
+                        price_change_1h = 0
+                        price_change_24h = 0
+                    
+                    par = {
+                        'baseToken': {'symbol': symbol, 'address': ca},
+                        'pairAddress': ca,
+                        'chainId': 'solana',
+                        'priceUsd': str(token.get('price', 0)),
+                        'liquidity': {'usd': liq},
+                        'volume': {'h24': vol},
+                        'priceChange': {'h1': price_change_1h, 'h24': price_change_24h},
+                        'fdv': mc,
+                        'marketCap': mc,
+                        'pairCreatedAt': created_at * 1000 if created_at and created_at < 10000000000 else created_at
+                    }
+                    
+                    passou, motivo = aplicar_filtros(par)
+                    if passou:
+                        if par not in tokens_validos:
+                            tokens_validos.append(par)
+                    else:
+                        motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
+                
+                break  # Se funcionou, não tenta mais URLs
+            else:
+                print(f"  ⚠️ HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"  ⚠️ Erro: {e}")
+            continue
+    
+    if total_brutos == 0:
+        print(f"  ⚠️ Nenhuma API do PumpPortal funcionou")
     
     return tokens_validos, total_brutos, motivos_filtro
 
@@ -451,7 +482,7 @@ def classificar_oportunidade(num_canais):
     elif num_canais == 1:
         return 2, "🥈 OPPORTUNITY"
     else:
-        return 3, "🥉 HIDDEN GEM"
+        return 3, " HIDDEN GEM"
 
 def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, analyses_url):
     liq = par.get('liquidity', {}).get('usd', 0)
@@ -466,7 +497,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     except:
         price_fmt = "N/A"
     
-    emojis = {1: "", 2: "🥈", 3: "🥉"}
+    emojis = {1: "🥇", 2: "🥈", 3: "🥉"}
     titulos = {1: "HIGH CONFIDENCE", 2: "OPPORTUNITY", 3: "HIDDEN GEM"}
     descricoes = {1: "Multiple alpha channels talking!", 2: "One alpha channel spotted it!", 3: "Nobody talking yet! Pure alpha!"}
     
@@ -474,37 +505,37 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
     canais_info = f"\n📢 *Mentioned:* {', '.join(['@'+c for c in canais_mencionados])}" if canais_mencionados else ""
     
     msg = (f"{emojis[nivel]} *PRIMEAPE 7 - {titulos[nivel]}* {emojis[nivel]}\n\n"
-           f"📌 *{descricoes[nivel]}*\n{canais_info}\n\n"
-           f"🪙 *Token:* #{token_symbol}\n*CA:* `{ca}`\n*Chain:* {chain.upper()}\n"
+           f" *{descricoes[nivel]}*\n{canais_info}\n\n"
+           f" *Token:* #{token_symbol}\n*CA:* `{ca}`\n*Chain:* {chain.upper()}\n"
            f"*Price:* {price_fmt}\n*Market Cap:* ${mc:,.2f}\n*Liquidity:* ${liq:,.2f}\n"
            f"*Vol 24h:* ${vol:,.2f}\n*Pump 1h:* {pump}%\n*Pump 24h:* {pump_24h}%\n\n⚠️ _DYOR!_")
     
-    keyboard = [[InlineKeyboardButton(" DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
+    keyboard = [[InlineKeyboardButton("🔍 DexScreener", url=dex_link), InlineKeyboardButton("🔄 Update", callback_data="refresh")],
                 [InlineKeyboardButton("📊 Analyses", url=analyses_url)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     return msg, reply_markup
 
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
     if total_alertados > 0:
-        msg = (f"🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+        msg = (f"🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
                f"📊 *Statistics:*\n• Total pairs scanned: `{total_brutos}`\n• Passed filters: `{total_filtrados}`\n"
                f"• 🚨 **New alerts sent: `{total_alertados}`**\n• CAs in memory: `{total_memoria}`\n\n"
-               f"🌐 *Networks:* SOL | ETH | BSC | BASE\n📡 *Channels:* {len(CANAIS_ALPHA)}\n")
-        keyboard = [[InlineKeyboardButton("🔄 Refresh", callback_data="refresh")]]
+               f"🌐 *Networks:* SOL | ETH | BSC | BASE\n *Channels:* {len(CANAIS_ALPHA)}\n")
+        keyboard = [[InlineKeyboardButton(" Refresh", callback_data="refresh")]]
         enviar_alerta_telegram(msg, InlineKeyboardMarkup(keyboard))
 
 async def main():
     global CANAIS_ALPHA
-    print(" PrimeApe 7 Started...")
+    print("🦍 PrimeApe 7 Started...")
     if not CANAIS_ALPHA:
         carregar_canais()
-    print(f"📡 Monitoring {len(CANAIS_ALPHA)} channels")
+    print(f" Monitoring {len(CANAIS_ALPHA)} channels")
     
     if verificar_market_pulse():
         enviar_market_pulse()
     
     cas_enviados = carregar_cas_enviados()
-    print(f"📋 {len(cas_enviados)} CAs in memory")
+    print(f" {len(cas_enviados)} CAs in memory")
     
     # 1. Busca DexScreener
     oportunidades_dex, total_dex, motivos_dex = buscar_pares_dexscreener()
@@ -541,7 +572,7 @@ async def main():
             seen.add(addr)
             oportunidades_unicas.append(op)
     
-    print(f" Total unique opportunities: {len(oportunidades_unicas)}")
+    print(f"🎯 Total unique opportunities: {len(oportunidades_unicas)}")
     
     novas = [op for op in oportunidades_unicas if op.get('pairAddress') not in cas_enviados]
     print(f"✨ {len(novas)} NEW opportunities")
