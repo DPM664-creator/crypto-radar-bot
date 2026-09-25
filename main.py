@@ -3,11 +3,7 @@ import os
 import asyncio
 import json
 import base64
-import hashlib
 from datetime import datetime
-from Crypto.PublicKey import RSA
-from Crypto.Signature import pkcs1_15
-from Crypto.Hash import SHA256
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -18,8 +14,6 @@ TELEGRAM_CHANNEL_ID = os.getenv('TELEGRAM_CHANNEL_ID')
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
 TELEGRAM_SESSION_STRING = os.getenv('TELEGRAM_SESSION_STRING')
-GMGN_API_KEY = os.getenv('GMGN_API_KEY')
-GMGN_PRIVATE_KEY = os.getenv('GMGN_PRIVATE_KEY')
 PAT_TOKEN = os.getenv('PAT_TOKEN')
 REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
@@ -305,31 +299,6 @@ def get_gmgn_link(ca, rede):
 def get_dexscreener_link(ca, rede):
     return f"https://dexscreener.com/{rede.lower()}/{ca}"
 
-def criar_assinatura_gmgn(method, path, timestamp):
-    """Cria assinatura RSA para API GMGN"""
-    if not GMGN_PRIVATE_KEY:
-        return ""
-    
-    try:
-        # Monta a mensagem a ser assinada
-        message = f"{method}{path}{timestamp}"
-        
-        # Importa a chave privada
-        private_key = RSA.import_key(GMGN_PRIVATE_KEY)
-        
-        # Cria hash SHA256
-        h = SHA256.new(message.encode('utf-8'))
-        
-        # Assina com RSA-PKCS1v15
-        signer = pkcs1_15.new(private_key)
-        signature = signer.sign(h)
-        
-        # Retorna em base64
-        return base64.b64encode(signature).decode('utf-8')
-    except Exception as e:
-        print(f"⚠️ Erro ao criar assinatura GMGN: {e}")
-        return ""
-
 def aplicar_filtros(par):
     """Retorna (True, None) se passar, ou (False, 'Motivo') se falhar"""
     liq = par.get('liquidity', {}).get('usd', 0)
@@ -409,104 +378,64 @@ def buscar_pares_dexscreener():
     
     return pares_validos, total_brutos, motivos_filtro
 
-def buscar_tokens_gmgn():
-    """Busca tokens recém-lançados via GMGN.AI Trenches com autenticação RSA"""
-    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning GMGN.AI...")
+def buscar_tokens_pumpfun():
+    """Busca tokens recém-lançados via API PÚBLICA do Pump.fun (SEM CHAVE)"""
+    print(f"📡 [{datetime.now().strftime('%H:%M:%S')}] Scanning Pump.fun (Public API)...")
     tokens_validos = []
     total_brutos = 0
     motivos_filtro = {}
     
-    # DEBUG COMPLETO - Verificar credenciais
-    print(f"  🔍 DEBUG: GMGN_API_KEY existe: {bool(GMGN_API_KEY)}")
-    print(f"  🔍 DEBUG: GMGN_PRIVATE_KEY existe: {bool(GMGN_PRIVATE_KEY)}")
-    
-    if GMGN_API_KEY:
-        print(f"  🔍 DEBUG: GMGN_API_KEY length: {len(GMGN_API_KEY)} chars")
-        print(f"  🔍 DEBUG: GMGN_API_KEY starts with: {GMGN_API_KEY[:10]}...")
-    
-    if GMGN_PRIVATE_KEY:
-        print(f"  🔍 DEBUG: GMGN_PRIVATE_KEY length: {len(GMGN_PRIVATE_KEY)} chars")
-        print(f"  🔍 DEBUG: GMGN_PRIVATE_KEY starts with: {GMGN_PRIVATE_KEY[:30]}...")
-        print(f"  🔍 DEBUG: Contains BEGIN PRIVATE KEY: {'-----BEGIN PRIVATE KEY-----' in GMGN_PRIVATE_KEY}")
-    
-    if not GMGN_API_KEY or not GMGN_PRIVATE_KEY:
-        print("  ⚠️ GMGN credentials not configured")
-        print("  💡 Verifique se os secrets GMGN_API_KEY e GMGN_PRIVATE_KEY estão configurados no GitHub")
-        return tokens_validos, total_brutos, motivos_filtro
-    
-    redes_gmgn = {
-        'solana': 'sol',
-        'ethereum': 'eth',
-        'bsc': 'bsc',
-        'base': 'base'
-    }
-    
-    for rede, chain_short in redes_gmgn.items():
-        try:
-            path = f"/defi/quotation/v1/trenches/{chain_short}"
-            timestamp = str(int(datetime.now().timestamp()))
-            signature = criar_assinatura_gmgn("GET", path, timestamp)
+    try:
+        # Endpoint público conhecido do Pump.fun para moedas recentes
+        url = "https://frontend-api.pump.fun/coins?offset=0&limit=100"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            tokens = data if isinstance(data, list) else data.get('data', [])
             
-            print(f"  🔍 DEBUG: Signature created for {chain_short}: {bool(signature)}")
+            print(f"  🔍 Pump.fun: {len(tokens)} tokens recentes encontrados")
+            total_brutos += len(tokens)
             
-            url = f"https://gmgn.ai{path}"
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'X-API-Key': GMGN_API_KEY,
-                'X-Timestamp': timestamp,
-                'X-Signature': signature,
-                'Accept': 'application/json'
-            }
-            
-            resp = requests.get(url, headers=headers, timeout=10)
-            
-            if resp.status_code == 200:
-                data = resp.json()
-                tokens = data.get('data', {}).get('trenches', [])
+            for token in tokens[:50]: # Top 50 mais recentes
+                ca = token.get('mint', '')
+                symbol = token.get('symbol', 'UNKNOWN')
+                mc = token.get('usd_market_cap', 0) or 0
+                vol = token.get('volume_24h', 0) or 0
+                created_at = token.get('created_timestamp', 0)
                 
-                print(f"  ✅ GMGN {chain_short.upper()}: {len(tokens)} tokens found")
-                total_brutos += len(tokens)
+                par = {
+                    'baseToken': {'symbol': symbol, 'address': ca},
+                    'pairAddress': ca,
+                    'chainId': 'solana',
+                    'priceUsd': str(token.get('usd_price', 0)),
+                    'liquidity': {'usd': token.get('virtual_liquidity', 0) or 0},
+                    'volume': {'h24': vol},
+                    'priceChange': {'h1': 0, 'h24': token.get('price_change_24h', 0)},
+                    'fdv': mc,
+                    'marketCap': mc,
+                    'pairCreatedAt': created_at * 1000 if created_at and created_at < 10000000000 else created_at
+                }
                 
-                for token in tokens[:50]:
-                    par = {
-                        'baseToken': {
-                            'symbol': token.get('symbol', ''),
-                            'address': token.get('address', '')
-                        },
-                        'pairAddress': token.get('address', ''),
-                        'chainId': rede,
-                        'priceUsd': str(token.get('price', 0)),
-                        'liquidity': {'usd': token.get('liquidity', 0)},
-                        'volume': {'h24': token.get('volume_24h', 0)},
-                        'priceChange': {
-                            'h1': token.get('price_change_1h', 0),
-                            'h24': token.get('price_change_24h', 0)
-                        },
-                        'fdv': token.get('market_cap', 0),
-                        'marketCap': token.get('market_cap', 0),
-                        'pairCreatedAt': token.get('created_at', 0)
-                    }
-                    
-                    passou, motivo = aplicar_filtros(par)
-                    if passou:
-                        if par not in tokens_validos:
-                            tokens_validos.append(par)
-                    else:
-                        motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
-            else:
-                print(f"  ⚠️ GMGN {chain_short}: HTTP {resp.status_code}")
-                print(f"  🔍 DEBUG: Response: {resp.text[:200]}")
-                
-        except Exception as e:
-            print(f"  ⚠️ Error GMGN {chain_short}: {e}")
+                passou, motivo = aplicar_filtros(par)
+                if passou:
+                    if par not in tokens_validos:
+                        tokens_validos.append(par)
+                else:
+                    motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + 1
+        else:
+            print(f"  ⚠️ Pump.fun API: HTTP {resp.status_code}")
+    except Exception as e:
+        print(f"  ⚠️ Erro ao buscar Pump.fun: {e}")
     
     return tokens_validos, total_brutos, motivos_filtro
 
 def classificar_oportunidade(num_canais):
     if num_canais >= 2:
-        return 1, " HIGH CONFIDENCE"
+        return 1, "🥇 HIGH CONFIDENCE"
     elif num_canais == 1:
-        return 2, " OPPORTUNITY"
+        return 2, "🥈 OPPORTUNITY"
     else:
         return 3, "🥉 HIDDEN GEM"
 
@@ -543,7 +472,7 @@ def formatar_alerta(par, nivel, canais_mencionados, ca, token_symbol, chain, ana
 
 async def enviar_status_scan(total_brutos, total_filtrados, total_alertados, total_memoria):
     if total_alertados > 0:
-        msg = (f" *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
+        msg = (f"🦍 *PRIMEAPE 7 - SCAN STATUS*\n\n⏰ _{datetime.now().strftime('%H:%M:%S UTC')}_\n\n"
                f"📊 *Statistics:*\n• Total pairs scanned: `{total_brutos}`\n• Passed filters: `{total_filtrados}`\n"
                f"• 🚨 **New alerts sent: `{total_alertados}`**\n• CAs in memory: `{total_memoria}`\n\n"
                f"🌐 *Networks:* SOL | ETH | BSC | BASE\n📡 *Channels:* {len(CANAIS_ALPHA)}\n")
@@ -563,23 +492,23 @@ async def main():
     cas_enviados = carregar_cas_enviados()
     print(f"📋 {len(cas_enviados)} CAs in memory")
     
-    # Busca DexScreener
+    # 1. Busca DexScreener
     oportunidades_dex, total_dex, motivos_dex = buscar_pares_dexscreener()
     print(f"🎯 DexScreener: {len(oportunidades_dex)} opportunities passed filters!")
     
-    # Busca GMGN (COM AUTENTICAÇÃO RSA)
-    oportunidades_gmgn, total_gmgn, motivos_gmgn = buscar_tokens_gmgn()
-    print(f" GMGN: {len(oportunidades_gmgn)} opportunities passed filters!")
+    # 2. Busca Pump.fun (GRATUITA E RÁPIDA)
+    oportunidades_pump, total_pump, motivos_pump = buscar_tokens_pumpfun()
+    print(f"🎯 Pump.fun: {len(oportunidades_pump)} opportunities passed filters!")
     
     # Une os resultados
-    oportunidades = oportunidades_dex + oportunidades_gmgn
-    total_brutos = total_dex + total_gmgn
+    oportunidades = oportunidades_dex + oportunidades_pump
+    total_brutos = total_dex + total_pump
     
     # Merge dos motivos de filtro para debug
     motivos_filtro = {}
     for motivo, qtd in motivos_dex.items():
         motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + qtd
-    for motivo, qtd in motivos_gmgn.items():
+    for motivo, qtd in motivos_pump.items():
         motivos_filtro[motivo] = motivos_filtro.get(motivo, 0) + qtd
     
     # Imprime relatório de debug
